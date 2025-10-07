@@ -1,0 +1,65 @@
+# Binarios para programas y plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Archivos de test, especialmente los que contienen datos
+*.test
+
+# Archivos de salida del compilador
+*.o
+*.a
+
+# Archivos de dependencias
+vendor/
+
+# Directorios de IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Archivos de configuración local
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Archivos temporales
+*.tmp
+*.temp
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Archivos de configuración específicos del entorno
+env_vars.yaml
+!env.example
+
+# Archivos de build
+build/
+dist/
+
+# Archivos de Docker
+docker-compose.override.yml
+
+# Archivos de configuración local
+*.local
+local.*
+
+# Archivos de backup
+*.bak
+*.backup
+
+# Node modules si hay scripts JS
+node_modules/
+
+# Archivos de configuración de Cloud Build específicos
+cloudbuild.yaml.local

@@ -1,0 +1,92 @@
+# Configuración para Cloud Build - opo-admin-server
+# Copia este archivo a cloudbuild.config y personaliza los valores
+
+# ===========================================
+# CONFIGURACIÓN DEL PROYECTO
+# ===========================================
+
+# ID de tu proyecto de Google Cloud
+# Obtener con: gcloud config get-value project
+PROJECT_ID=blog-panel-460312
+
+# Región donde se desplegará (recomendado: europe-southwest1 para Europa)
+REGION=europe-southwest1
+
+# Nombre del repositorio de Artifact Registry
+# Si no existe, crear con:
+# gcloud artifacts repositories create blog-repository --repository-format=docker --location=europe-southwest1
+REPOSITORY_NAME=blog-repository
+
+# Nombre del servicio en Cloud Run
+SERVICE_NAME=opo-admin-server
+
+# Tag de la imagen Docker (latest para última versión)
+TAG=latest
+
+# ===========================================
+# CUENTA DE SERVICIO
+# ===========================================
+
+# Cuenta de servicio para Cloud Run
+# Formato: NOMBRE@PROJECT_ID.iam.gserviceaccount.com
+# Si no tienes una, puedes usar la cuenta por defecto o crear una nueva:
+# gcloud iam service-accounts create opo-admin-sa --display-name="OPO Admin Service Account"
+SERVICE_ACCOUNT=blog-255@blog-panel-460312.iam.gserviceaccount.com
+
+# ===========================================
+# VARIABLES DE ENTORNO DE LA APLICACIÓN
+# ===========================================
+
+# Puerto interno de Cloud Run (NO CAMBIAR)
+PORT=8080
+
+# Base path de la API
+API_BASE_PATH=/api/v1
+
+# Nombre de la base de datos MongoDB
+DB_NAME=opo
+
+# URL de conexión a MongoDB Atlas
+# IMPORTANTE: Reemplaza con tu URL real
+# Formato: mongodb+srv://usuario:password@cluster.mongodb.net/opo?retryWrites=true&w=majority
+DB_URL=mongodb+srv://terro:Terro1975$@cluster0.8s3fkqv.mongodb.net/opo?retryWrites=true&w=majority&appName=Cluster0
+
+# Secret JWT para firmar tokens de autenticación
+# IMPORTANTE: Genera un secret fuerte y seguro
+# Ejemplo: openssl rand -base64 32
+JWT_SECRET=admin-jwt-secret-cambia-esto-por-uno-seguro
+
+# Orígenes permitidos para CORS (separados por comas)
+# Incluye los dominios donde estará desplegado tu frontend
+# Ejemplo: https://admin.tudominio.com,https://panel.tudominio.com
+CORS_ALLOWED_ORIGINS=https://localhost,http://localhost:4200,https://tu-admin-frontend.com
+
+# ===========================================
+# RECURSOS DE CLOUD RUN
+# ===========================================
+
+# Memoria asignada (256Mi, 512Mi, 1Gi, 2Gi, 4Gi)
+MEMORY=512Mi
+
+# CPU asignada (0.5, 1, 2, 4)
+CPU=1
+
+# Mínimo de instancias (0 para escalar a cero)
+MIN_INSTANCES=0
+
+# Máximo de instancias
+MAX_INSTANCES=5
+
+# ===========================================
+# OPCIONES DE BUILD
+# ===========================================
+
+# Tipo de máquina para el build (E2_HIGHCPU_8, N1_HIGHCPU_8, etc.)
+MACHINE_TYPE=E2_HIGHCPU_8
+
+# Tamaño del disco para el build (GB)
+DISK_SIZE_GB=100
+
+# Timeout del build (segundos)
+TIMEOUT=1200s
+

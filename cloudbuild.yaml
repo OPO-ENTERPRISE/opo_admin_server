@@ -1,0 +1,67 @@
+# Configuración de Cloud Build para opo-admin-server
+steps:
+  # Construir la imagen Docker
+  - name: 'gcr.io/cloud-builders/docker'
+    args: 
+      - 'build'
+      - '-t'
+      - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY_NAME/$_SERVICE_NAME:$_TAG'
+      - '-f'
+      - 'Dockerfile.prod'
+      - '.'
+    id: 'build-image'
+
+  # Subir la imagen al Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY_NAME/$_SERVICE_NAME:$_TAG'
+    id: 'push-image'
+    waitFor: ['build-image']
+
+  # Desplegar en Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - '$_SERVICE_NAME'
+      - '--image'
+      - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY_NAME/$_SERVICE_NAME:$_TAG'
+      - '--region'
+      - '$_REGION'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '5'
+      - '--service-account'
+      - '$_SERVICE_ACCOUNT'
+      - '--set-env-vars'
+      - 'PORT=8080,API_BASE_PATH=/api/v1,DB_NAME=opo,DB_URL=mongodb+srv://terro:Terro1975%24@cluster0.8s3fkqv.mongodb.net/opo?retryWrites=true&w=majority&appName=Cluster0,JWT_SECRET=admin-jwt-secret-super-seguro,CORS_ALLOWED_ORIGINS=*'
+    id: 'deploy-cloud-run'
+    waitFor: ['push-image']
+
+# Variables de sustitución
+substitutions:
+  _REGION: 'europe-southwest1'
+  _REPOSITORY_NAME: 'blog-repository'
+  _SERVICE_NAME: 'opo-admin-server'
+  _TAG: 'latest'
+  _SERVICE_ACCOUNT: 'blog-255@blog-panel-460312.iam.gserviceaccount.com'
+
+# Opciones de build
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+  diskSizeGb: 100
+  substitution_option: 'ALLOW_LOOSE'
+
+# Timeout del build (20 minutos)
+timeout: '1200s'

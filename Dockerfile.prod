@@ -1,0 +1,58 @@
+# syntax=docker/dockerfile:1
+
+# Etapa de construcción
+FROM golang:1.21-alpine AS builder
+
+# Instalar dependencias del sistema necesarias
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Crear usuario no-root para seguridad
+RUN adduser -D -s /bin/sh appuser
+
+WORKDIR /app
+
+# Copiar archivos de dependencias
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copiar código fuente
+COPY . .
+
+# Construir la aplicación
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags='-w -s -extldflags "-static"' \
+    -a -installsuffix cgo \
+    -o admin-server ./cmd/admin
+
+# Etapa de producción
+FROM gcr.io/distroless/base-debian12
+
+# Instalar certificados CA y zona horaria
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+# Copiar el binario compilado
+COPY --from=builder /app/admin-server /admin-server
+
+# NO copiar .env para evitar sobrescribir variables de Cloud Run
+
+# Copiar usuario no-root
+COPY --from=builder /etc/passwd /etc/passwd
+USER appuser
+
+# Variables de entorno por defecto (serán sobrescritas por Cloud Run)
+ENV PORT=8080
+ENV API_BASE_PATH=/api/v1
+ENV CORS_ALLOWED_ORIGINS=https://localhost,http://localhost
+ENV DB_NAME=opo
+
+# Exponer puerto
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["/admin-server", "--health-check"] || exit 1
+
+# Ejecutar la aplicación
+ENTRYPOINT ["/admin-server"]
+

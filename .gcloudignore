@@ -1,0 +1,64 @@
+# Git files
+.git
+.gitignore
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+admin-server
+main.exe
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Test files
+*_test.go
+test-*.js
+check-*.js
+
+# Documentation
+*.md
+README*
+INSTALACION*
+
+# Scripts de desarrollo
+scripts/
+start-server.sh
+start-server.bat
+
+# Archivos temporales
+tmp/
+temp/
+nul
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files de desarrollo
+Dockerfile
+docker-compose.yml
+docker-compose.override.yml
+
+# Node modules (si hay scripts)
+node_modules/
+package.json
+package-lock.json
+
