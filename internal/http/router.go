@@ -11,7 +11,7 @@ import (
 
 func NewRouter(cfg config.Config) http.Handler {
 	r := chi.NewRouter()
-
+	println("CORSAllowedOrigins: ", cfg.CORSAllowedOrigins)
 	// Middleware CORS
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.CORSAllowedOrigins,
