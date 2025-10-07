@@ -42,7 +42,7 @@ RUN chown appuser:appuser admin-server
 USER appuser
 
 # Exponer puerto
-EXPOSE 8081
+EXPOSE 8080
 
 # Comando por defecto
 CMD ["./admin-server"]
