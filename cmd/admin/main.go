@@ -20,7 +20,7 @@ func main() {
 	log.Printf("📡 API Base Path: %s", cfg.APIBasePath)
 	log.Printf("🌐 CORS Origins: %v", cfg.CORSAllowedOrigins)
 
-	if err := http.ListenAndServe(":"+cfg.Port, router); err != nil {
+	if err := http.ListenAndServe(":8080", router); err != nil {
 		log.Fatalf("❌ Error al iniciar servidor: %v", err)
 	}
 }
