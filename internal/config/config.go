@@ -63,7 +63,7 @@ func Load() Config {
 	}
 
 	config := Config{
-		Port:               getenv("PORT", "8081"), // Puerto diferente para admin
+		Port:               getenv("PORT", "8080"), // Puerto diferente para admin
 		APIBasePath:        getenv("API_BASE_PATH", "/api/v1"),
 		JWTSecret:          getenv("JWT_SECRET", "admin-secret-key"),
 		CORSAllowedOrigins: allowedOrigins,
