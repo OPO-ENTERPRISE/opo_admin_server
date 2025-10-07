@@ -42,7 +42,7 @@ RUN chown appuser:appuser admin-server
 USER appuser
 ENV PORT=8080 \
     API_BASE_PATH=/api/v1 \
-    CORS_ALLOWED_ORIGINS=https://localhost,http://localhost,capacitor://localhost,ionic://localhost,https://localhost:8100,http://localhost:8100 \
+    CORS_ALLOWED_ORIGINS=https://opo-admin-server-chhoc2a3ja-ew.a.run.app,https://localhost,http://localhost,capacitor://localhost,ionic://localhost,https://localhost:8100,http://localhost:8100 \
     JWT_SECRET=dev-secret \
     DB_URL=mongodb+srv://terro:Terro1975%24@cluster0.8s3fkqv.mongodb.net/opo?retryWrites=true&w=majority&appName=Cluster0 \
     DB_NAME=opo
