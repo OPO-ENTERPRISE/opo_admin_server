@@ -2,6 +2,12 @@
 
 Servidor de administración separado para gestionar usuarios y topics de la aplicación de tests de oposiciones.
 
+[![Go Version](https://img.shields.io/badge/Go-1.21+-blue.svg)](https://golang.org/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Deploy Status](https://img.shields.io/badge/Deploy-Google%20Cloud%20Run-orange.svg)](https://cloud.google.com/run)
+
+> **Repositorio**: [https://github.com/JoseCamposDeveloper/opo_admin_server.git](https://github.com/JoseCamposDeveloper/opo_admin_server.git)
+
 ## 🎯 Características
 
 - **Usuario administrador único**: Solo un usuario puede acceder al panel de administración
