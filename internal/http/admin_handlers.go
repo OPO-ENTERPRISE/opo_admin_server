@@ -1552,3 +1552,314 @@ func AdminUsersToggleEnabled(cfg config.Config) http.HandlerFunc {
 		})
 	}
 }
+
+// ========== Handlers de Proveedores de Publicidad ==========
+
+// AdminProvidersList - Listar proveedores con paginación
+func AdminProvidersList(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		if page < 1 {
+			page = 1
+		}
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		if limit < 1 || limit > 100 {
+			limit = 20
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+
+		client, err := getMongoClient(ctx, cfg)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer client.Disconnect(context.Background())
+
+		col := client.Database(cfg.DBName).Collection("ad_providers")
+
+		filter := bson.M{}
+
+		// Filtro por enabled si viene en parámetros
+		enabledParam := r.URL.Query().Get("enabled")
+		if enabledParam != "" {
+			enabled := enabledParam == "true"
+			filter["enabled"] = enabled
+		}
+
+		total, err := col.CountDocuments(ctx, filter)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		skip := (page - 1) * limit
+		opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit)).SetSort(bson.D{{Key: "order", Value: 1}})
+
+		cur, err := col.Find(ctx, filter, opts)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer cur.Close(ctx)
+
+		var providers []domain.AdProvider
+		if err := cur.All(ctx, &providers); err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		totalPages := int(total) / limit
+		if int(total)%limit > 0 {
+			totalPages++
+		}
+
+		response := domain.PaginatedResponse{
+			Items: providers,
+			Pagination: domain.PaginationInfo{
+				Page:       page,
+				Limit:      limit,
+				Total:      int(total),
+				TotalPages: totalPages,
+			},
+		}
+
+		writeJSON(w, http.StatusOK, response)
+	}
+}
+
+// AdminProvidersGetByID - Obtener proveedor por ID
+func AdminProvidersGetByID(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		client, err := getMongoClient(ctx, cfg)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer client.Disconnect(context.Background())
+
+		col := client.Database(cfg.DBName).Collection("ad_providers")
+
+		var provider domain.AdProvider
+		if err := col.FindOne(ctx, bson.M{"_id": id}).Decode(&provider); err != nil {
+			if err == mongo.ErrNoDocuments {
+				writeError(w, http.StatusNotFound, "not_found", "proveedor no encontrado")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, provider)
+	}
+}
+
+// AdminProvidersCreate - Crear nuevo proveedor
+func AdminProvidersCreate(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req domain.AdProvider
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid json")
+			return
+		}
+
+		req.Name = strings.TrimSpace(req.Name)
+		req.ProviderID = strings.TrimSpace(strings.ToLower(req.ProviderID))
+
+		if req.Name == "" || req.ProviderID == "" {
+			writeError(w, http.StatusUnprocessableEntity, "validation_error", "name y providerId requeridos")
+			return
+		}
+
+		if len(req.Name) < 3 || len(req.Name) > 100 {
+			writeError(w, http.StatusUnprocessableEntity, "validation_error", "name debe tener entre 3 y 100 caracteres")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		client, err := getMongoClient(ctx, cfg)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer client.Disconnect(context.Background())
+
+		col := client.Database(cfg.DBName).Collection("ad_providers")
+
+		// Verificar que no existe un proveedor con el mismo providerId
+		var existing domain.AdProvider
+		if err := col.FindOne(ctx, bson.M{"providerId": req.ProviderID}).Decode(&existing); err == nil {
+			writeError(w, http.StatusConflict, "provider_exists", "ya existe un proveedor con este ID")
+			return
+		}
+
+		now := time.Now()
+		req.ID = uuid.NewString()
+		req.CreatedAt = now
+		req.UpdatedAt = now
+
+		if _, err := col.InsertOne(ctx, req); err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		log.Printf("✅ AdminProvidersCreate - Proveedor %s creado", req.ProviderID)
+		writeJSON(w, http.StatusCreated, req)
+	}
+}
+
+// AdminProvidersUpdate - Actualizar proveedor
+func AdminProvidersUpdate(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+
+		var req domain.AdProvider
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid json")
+			return
+		}
+
+		req.Name = strings.TrimSpace(req.Name)
+
+		if req.Name != "" && (len(req.Name) < 3 || len(req.Name) > 100) {
+			writeError(w, http.StatusUnprocessableEntity, "validation_error", "name debe tener entre 3 y 100 caracteres")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		client, err := getMongoClient(ctx, cfg)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer client.Disconnect(context.Background())
+
+		col := client.Database(cfg.DBName).Collection("ad_providers")
+
+		update := bson.M{
+			"$set": bson.M{
+				"name":      req.Name,
+				"icon":      req.Icon,
+				"color":     req.Color,
+				"order":     req.Order,
+				"updatedAt": time.Now(),
+			},
+		}
+
+		var provider domain.AdProvider
+		if err := col.FindOneAndUpdate(ctx, bson.M{"_id": id}, update, options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&provider); err != nil {
+			if err == mongo.ErrNoDocuments {
+				writeError(w, http.StatusNotFound, "not_found", "proveedor no encontrado")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		log.Printf("✅ AdminProvidersUpdate - Proveedor %s actualizado", id)
+		writeJSON(w, http.StatusOK, provider)
+	}
+}
+
+// AdminProvidersToggleEnabled - Cambiar estado enabled/disabled
+func AdminProvidersToggleEnabled(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+
+		var req struct {
+			Enabled bool `json:"enabled"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid json")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		client, err := getMongoClient(ctx, cfg)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer client.Disconnect(context.Background())
+
+		col := client.Database(cfg.DBName).Collection("ad_providers")
+
+		update := bson.M{
+			"$set": bson.M{
+				"enabled":   req.Enabled,
+				"updatedAt": time.Now(),
+			},
+		}
+
+		result, err := col.UpdateOne(ctx, bson.M{"_id": id}, update)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		if result.MatchedCount == 0 {
+			writeError(w, http.StatusNotFound, "not_found", "proveedor no encontrado")
+			return
+		}
+
+		log.Printf("✅ AdminProvidersToggleEnabled - Proveedor %s actualizado a enabled: %v", id, req.Enabled)
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id":      id,
+			"enabled": req.Enabled,
+			"message": "Estado del proveedor actualizado exitosamente",
+		})
+	}
+}
+
+// AdminProvidersDelete - Eliminar proveedor
+func AdminProvidersDelete(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		client, err := getMongoClient(ctx, cfg)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer client.Disconnect(context.Background())
+
+		col := client.Database(cfg.DBName).Collection("ad_providers")
+
+		result, err := col.DeleteOne(ctx, bson.M{"_id": id})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		if result.DeletedCount == 0 {
+			writeError(w, http.StatusNotFound, "not_found", "proveedor no encontrado")
+			return
+		}
+
+		log.Printf("✅ AdminProvidersDelete - Proveedor %s eliminado", id)
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"message":   "Proveedor eliminado exitosamente",
+			"deletedId": id,
+		})
+	}
+}

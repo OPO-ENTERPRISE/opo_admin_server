@@ -102,6 +102,19 @@ type TopicStats struct {
 	DisabledTopics int            `json:"disabledTopics"`
 }
 
+// AdProvider representa un proveedor de publicidad
+type AdProvider struct {
+	ID         string    `bson:"_id" json:"_id"`
+	ProviderID string    `bson:"providerId" json:"providerId"` // Slug único: "admob", "facebook"
+	Name       string    `bson:"name" json:"name"`             // Nombre visible: "AdMob"
+	Icon       string    `bson:"icon,omitempty" json:"icon,omitempty"`
+	Color      string    `bson:"color,omitempty" json:"color,omitempty"`
+	Enabled    bool      `bson:"enabled" json:"enabled"`
+	Order      int       `bson:"order" json:"order"`
+	CreatedAt  time.Time `bson:"createdAt" json:"createdAt"`
+	UpdatedAt  time.Time `bson:"updatedAt" json:"updatedAt"`
+}
+
 // ErrorResponse representa una respuesta de error
 type ErrorResponse struct {
 	Code    string `json:"code"`

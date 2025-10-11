@@ -96,6 +96,14 @@ func NewRouter(cfg config.Config) http.Handler {
 		r.Get("/users", AdminUsersList(cfg))
 		r.Patch("/users/{id}/enabled", AdminUsersToggleEnabled(cfg))
 
+		// Administración de proveedores de publicidad
+		r.Get("/providers", AdminProvidersList(cfg))
+		r.Get("/providers/{id}", AdminProvidersGetByID(cfg))
+		r.Post("/providers", AdminProvidersCreate(cfg))
+		r.Put("/providers/{id}", AdminProvidersUpdate(cfg))
+		r.Patch("/providers/{id}/enabled", AdminProvidersToggleEnabled(cfg))
+		r.Delete("/providers/{id}", AdminProvidersDelete(cfg))
+
 		// Estadísticas
 		r.Get("/stats/user", AdminStatsUser(cfg))
 		r.Get("/stats/topics", AdminStatsTopics(cfg))
