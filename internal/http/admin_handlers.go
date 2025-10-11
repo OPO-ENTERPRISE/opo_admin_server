@@ -515,7 +515,15 @@ func AdminTopicsUpdate(cfg config.Config) http.HandlerFunc {
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		// Validar área si se proporciona
+		if req.Area != 0 {
+			if req.Area != 1 && req.Area != 2 {
+				writeError(w, http.StatusUnprocessableEntity, "validation_error", "area debe ser 1 o 2")
+				return
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 
 		client, err := getMongoClient(ctx, cfg)
@@ -538,6 +546,12 @@ func AdminTopicsUpdate(cfg config.Config) http.HandlerFunc {
 			},
 		}
 
+		// Agregar área al update si se proporciona
+		if req.Area != 0 {
+			update["$set"].(bson.M)["area"] = req.Area
+			log.Printf("🔄 AdminTopicsUpdate - Actualizando área del topic %d a %d", id, req.Area)
+		}
+
 		var topic domain.Topic
 		if err := col.FindOneAndUpdate(ctx, bson.M{"id": id}, update, options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&topic); err != nil {
 			if err == mongo.ErrNoDocuments {
@@ -548,6 +562,44 @@ func AdminTopicsUpdate(cfg config.Config) http.HandlerFunc {
 			return
 		}
 
+		// Si se cambió el área y es un tema principal, actualizar todos los subtopics
+		if req.Area != 0 && topic.IsMainTopic() {
+			log.Printf("🔍 AdminTopicsUpdate - Es un tema principal, buscando subtopics con rootId=%d", id)
+
+			// Buscar todos los subtopics (donde rootId == id del tema principal y id != rootId)
+			subtopicsFilter := bson.M{
+				"rootId": id,
+				"id":     bson.M{"$ne": id}, // id !== rootId (son subtopics)
+			}
+
+			// Contar cuántos subtopics hay
+			subtopicsCount, err := col.CountDocuments(ctx, subtopicsFilter)
+			if err != nil {
+				log.Printf("⚠️ AdminTopicsUpdate - Error contando subtopics: %v", err)
+			} else {
+				log.Printf("📊 AdminTopicsUpdate - Encontrados %d subtopics para actualizar", subtopicsCount)
+
+				if subtopicsCount > 0 {
+					// Actualizar el área de todos los subtopics
+					subtopicsUpdate := bson.M{
+						"$set": bson.M{
+							"area":      req.Area,
+							"updatedAt": time.Now(),
+						},
+					}
+
+					updateResult, err := col.UpdateMany(ctx, subtopicsFilter, subtopicsUpdate)
+					if err != nil {
+						log.Printf("❌ AdminTopicsUpdate - Error actualizando subtopics: %v", err)
+						// No devolvemos error porque el topic principal sí se actualizó
+					} else {
+						log.Printf("✅ AdminTopicsUpdate - %d subtopics actualizados al área %d", updateResult.ModifiedCount, req.Area)
+					}
+				}
+			}
+		}
+
+		log.Printf("✅ AdminTopicsUpdate - Topic %d actualizado exitosamente", id)
 		writeJSON(w, http.StatusOK, topic)
 	}
 }

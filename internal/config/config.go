@@ -54,10 +54,10 @@ func Load() Config {
 
 	// Parsear CORS origins
 	corsOrigins := getenv("CORS_ALLOWED_ORIGINS", "http://localhost:8100,https://localhost:8100,capacitor://localhost,ionic://localhost")
-	
+
 	// Limpiar cualquier = al inicio (problema de Cloud Run)
 	corsOrigins = strings.TrimPrefix(corsOrigins, "=")
-	
+
 	var allowedOrigins []string
 	for _, origin := range strings.Split(corsOrigins, ",") {
 		origin = strings.TrimSpace(origin)
@@ -67,7 +67,7 @@ func Load() Config {
 			allowedOrigins = append(allowedOrigins, origin)
 		}
 	}
-	
+
 	// Log de debug para ver los orígenes parseados
 	log.Printf("🌐 CORS Origins parseados: %v", allowedOrigins)
 

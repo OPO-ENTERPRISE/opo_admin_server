@@ -43,7 +43,7 @@ USER appuser
 # Variables de entorno por defecto (serán sobrescritas por Cloud Run)
 
 ENV API_BASE_PATH=/api/v1
-ENV CORS_ALLOWED_ORIGINS=https://localhost,http://localhost
+ENV CORS_ALLOWED_ORIGINS=https://opo-admin-front-1059081962188.europe-west1.run.app,https://opo-admin-server-chhoc2a3ja-ew.a.run.app,https://localhost,http://localhost,capacitor://localhost,ionic://localhost,https://localhost:8100,http://localhost:8100
 ENV DB_NAME=opo
 
 # Exponer puerto
