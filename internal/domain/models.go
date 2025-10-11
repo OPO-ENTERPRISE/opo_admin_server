@@ -41,6 +41,7 @@ type Topic struct {
 	ImageURL    string    `bson:"imageUrl,omitempty" json:"imageUrl,omitempty"`
 	Enabled     bool      `bson:"enabled" json:"enabled"`
 	Premium     bool      `bson:"premium" json:"premium"` // Nuevo campo premium
+	Type        string    `bson:"type" json:"type"`       // Tipo: "topic", "exam", "misc"
 	Order       int       `bson:"order" json:"order"`
 	ParentUUID  string    `bson:"parentUuid,omitempty" json:"parentUuid,omitempty"`
 	CreatedAt   time.Time `bson:"createdAt" json:"createdAt"`

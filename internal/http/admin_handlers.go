@@ -266,6 +266,18 @@ func AdminTopicsList(cfg config.Config) http.HandlerFunc {
 			log.Printf("🔍 AdminTopicsList - Aplicando filtro premium: %v", premium)
 		}
 
+		// Agregar filtro de type si viene en los parámetros
+		typeParam := r.URL.Query().Get("type")
+		if typeParam != "" {
+			// Validar que el type sea válido
+			if typeParam == "topic" || typeParam == "exam" || typeParam == "misc" {
+				filter["type"] = typeParam
+				log.Printf("🔍 AdminTopicsList - Aplicando filtro type: %s", typeParam)
+			} else {
+				log.Printf("⚠️ AdminTopicsList - Type inválido ignorado: %s", typeParam)
+			}
+		}
+
 		// Agregar filtro de búsqueda si viene en los parámetros
 		searchParam := r.URL.Query().Get("search")
 		if searchParam != "" {
@@ -455,6 +467,16 @@ func AdminTopicsCreate(cfg config.Config) http.HandlerFunc {
 			return
 		}
 
+		// Validar tipo si se proporciona, sino establecer valor por defecto
+		if req.Type == "" {
+			req.Type = "topic" // Valor por defecto
+		} else {
+			if req.Type != "topic" && req.Type != "exam" && req.Type != "misc" {
+				writeError(w, http.StatusUnprocessableEntity, "validation_error", "type debe ser 'topic', 'exam' o 'misc'")
+				return
+			}
+		}
+
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
@@ -492,6 +514,7 @@ func AdminTopicsCreate(cfg config.Config) http.HandlerFunc {
 			return
 		}
 
+		log.Printf("✅ AdminTopicsCreate - Topic %d creado con type: %s", req.TopicID, req.Type)
 		writeJSON(w, http.StatusCreated, req)
 	}
 }
@@ -519,6 +542,14 @@ func AdminTopicsUpdate(cfg config.Config) http.HandlerFunc {
 		if req.Area != 0 {
 			if req.Area != 1 && req.Area != 2 {
 				writeError(w, http.StatusUnprocessableEntity, "validation_error", "area debe ser 1 o 2")
+				return
+			}
+		}
+
+		// Validar tipo si se proporciona
+		if req.Type != "" {
+			if req.Type != "topic" && req.Type != "exam" && req.Type != "misc" {
+				writeError(w, http.StatusUnprocessableEntity, "validation_error", "type debe ser 'topic', 'exam' o 'misc'")
 				return
 			}
 		}
@@ -552,6 +583,12 @@ func AdminTopicsUpdate(cfg config.Config) http.HandlerFunc {
 			log.Printf("🔄 AdminTopicsUpdate - Actualizando área del topic %d a %d", id, req.Area)
 		}
 
+		// Agregar tipo al update si se proporciona
+		if req.Type != "" {
+			update["$set"].(bson.M)["type"] = req.Type
+			log.Printf("🔄 AdminTopicsUpdate - Actualizando type del topic %d a %s", id, req.Type)
+		}
+
 		var topic domain.Topic
 		if err := col.FindOneAndUpdate(ctx, bson.M{"id": id}, update, options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&topic); err != nil {
 			if err == mongo.ErrNoDocuments {
@@ -562,8 +599,8 @@ func AdminTopicsUpdate(cfg config.Config) http.HandlerFunc {
 			return
 		}
 
-		// Si se cambió el área y es un tema principal, actualizar todos los subtopics
-		if req.Area != 0 && topic.IsMainTopic() {
+		// Si se cambió el área o el tipo y es un tema principal, actualizar todos los subtopics
+		if (req.Area != 0 || req.Type != "") && topic.IsMainTopic() {
 			log.Printf("🔍 AdminTopicsUpdate - Es un tema principal, buscando subtopics con rootId=%d", id)
 
 			// Buscar todos los subtopics (donde rootId == id del tema principal y id != rootId)
@@ -580,12 +617,23 @@ func AdminTopicsUpdate(cfg config.Config) http.HandlerFunc {
 				log.Printf("📊 AdminTopicsUpdate - Encontrados %d subtopics para actualizar", subtopicsCount)
 
 				if subtopicsCount > 0 {
-					// Actualizar el área de todos los subtopics
+					// Preparar actualización de subtopics
+					subtopicsUpdateFields := bson.M{
+						"updatedAt": time.Now(),
+					}
+
+					// Agregar área si se cambió
+					if req.Area != 0 {
+						subtopicsUpdateFields["area"] = req.Area
+					}
+
+					// Agregar tipo si se cambió
+					if req.Type != "" {
+						subtopicsUpdateFields["type"] = req.Type
+					}
+
 					subtopicsUpdate := bson.M{
-						"$set": bson.M{
-							"area":      req.Area,
-							"updatedAt": time.Now(),
-						},
+						"$set": subtopicsUpdateFields,
 					}
 
 					updateResult, err := col.UpdateMany(ctx, subtopicsFilter, subtopicsUpdate)
@@ -593,7 +641,13 @@ func AdminTopicsUpdate(cfg config.Config) http.HandlerFunc {
 						log.Printf("❌ AdminTopicsUpdate - Error actualizando subtopics: %v", err)
 						// No devolvemos error porque el topic principal sí se actualizó
 					} else {
-						log.Printf("✅ AdminTopicsUpdate - %d subtopics actualizados al área %d", updateResult.ModifiedCount, req.Area)
+						if req.Area != 0 && req.Type != "" {
+							log.Printf("✅ AdminTopicsUpdate - %d subtopics actualizados (área: %d, type: %s)", updateResult.ModifiedCount, req.Area, req.Type)
+						} else if req.Area != 0 {
+							log.Printf("✅ AdminTopicsUpdate - %d subtopics actualizados al área %d", updateResult.ModifiedCount, req.Area)
+						} else if req.Type != "" {
+							log.Printf("✅ AdminTopicsUpdate - %d subtopics actualizados al type %s", updateResult.ModifiedCount, req.Type)
+						}
 					}
 				}
 			}
