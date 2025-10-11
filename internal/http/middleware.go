@@ -15,6 +15,13 @@ import (
 func AuthJWT(cfg config.Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Permitir peticiones OPTIONS sin autenticación (preflight CORS)
+			if r.Method == "OPTIONS" {
+				log.Printf("✅ AuthJWT Middleware - OPTIONS request, skipping auth")
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			auth := r.Header.Get("Authorization")
 			log.Printf("🔍 AuthJWT Middleware - URL: %s", r.URL.Path)
 			log.Printf("🔍 AuthJWT Middleware - Authorization header: %s", auth)

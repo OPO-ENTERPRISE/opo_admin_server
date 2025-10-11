@@ -13,26 +13,37 @@ func NewRouter(cfg config.Config) http.Handler {
 	r := chi.NewRouter()
 	println("CORSAllowedOrigins: ", cfg.CORSAllowedOrigins)
 
-	// Middleware CORS
+	// Middleware CORS mejorado
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.CORSAllowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		ExposedHeaders:   []string{"Link"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Requested-With", "Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers"},
+		ExposedHeaders:   []string{"Link", "Content-Length", "Content-Type", "Authorization"},
 		AllowCredentials: true,
-		MaxAge:           300,
+		MaxAge:           86400, // 24 horas
 	}))
 
-	// Middleware de logging
+	// Middleware de logging mejorado
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Log de requests
+			println("Request:", r.Method, r.URL.Path, "Origin:", r.Header.Get("Origin"))
 			next.ServeHTTP(w, r)
 		})
 	})
 
+	// Handler global para OPTIONS (captura todas las rutas)
+	r.Options("/*", func(w http.ResponseWriter, r *http.Request) {
+		// El middleware CORS ya configuró los headers
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	// Rutas públicas
 	r.Route(cfg.APIBasePath, func(r chi.Router) {
+		// Handler para OPTIONS dentro del grupo API
+		r.Options("/*", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})
+
 		// Health check
 		r.Get("/healthz", Healthz)
 
@@ -52,6 +63,11 @@ func NewRouter(cfg config.Config) http.Handler {
 	// Rutas protegidas (requieren JWT)
 	r.Route(cfg.APIBasePath+"/admin", func(r chi.Router) {
 		r.Use(AuthJWT(cfg))
+
+		// Handler para OPTIONS en rutas protegidas
+		r.Options("/*", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})
 
 		// Gestión del usuario administrador
 		r.Get("/user", AdminUserGet(cfg))
