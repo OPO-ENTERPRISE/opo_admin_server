@@ -109,6 +109,10 @@ func NewRouter(cfg config.Config) http.Handler {
 		r.Get("/stats/topics", AdminStatsTopics(cfg))
 		r.Get("/stats/area/{areaId}", AdminStatsArea(cfg))
 		r.Get("/stats/areas", AdminStatsAllAreas(cfg))
+
+		// Gestión de base de datos
+		r.Get("/database/stats", AdminDatabaseStats(cfg))
+		r.Get("/database/download", AdminDatabaseDownload(cfg))
 	})
 
 	return r

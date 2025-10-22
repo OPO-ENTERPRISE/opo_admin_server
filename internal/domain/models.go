@@ -115,6 +115,21 @@ type AdProvider struct {
 	UpdatedAt  time.Time `bson:"updatedAt" json:"updatedAt"`
 }
 
+// DatabaseStats representa estadísticas de la base de datos
+type DatabaseStats struct {
+	DatabaseName   string            `json:"databaseName"`
+	TotalSize      int64             `json:"totalSize"`
+	Collections    []CollectionStats `json:"collections"`
+	TotalDocuments int64             `json:"totalDocuments"`
+}
+
+// CollectionStats representa estadísticas de una colección
+type CollectionStats struct {
+	Name          string `json:"name"`
+	DocumentCount int64  `json:"documentCount"`
+	Size          int64  `json:"size"`
+}
+
 // ErrorResponse representa una respuesta de error
 type ErrorResponse struct {
 	Code    string `json:"code"`

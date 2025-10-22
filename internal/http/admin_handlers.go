@@ -1,10 +1,17 @@
 package http
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -1857,9 +1864,234 @@ func AdminProvidersDelete(cfg config.Config) http.HandlerFunc {
 
 		log.Printf("✅ AdminProvidersDelete - Proveedor %s eliminado", id)
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"message":   "Proveedor eliminado exitosamente",
-			"deletedId": id,
-		})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":   "Proveedor eliminado exitosamente",
+		"deletedId": id,
+	})
+}
+
+// ========== Handlers de Base de Datos ==========
+
+// AdminDatabaseStats - Obtener estadísticas de la base de datos
+func AdminDatabaseStats(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
+		client, err := getMongoClient(ctx, cfg)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer client.Disconnect(context.Background())
+
+		database := client.Database(cfg.DBName)
+
+		// Obtener lista de colecciones
+		collections, err := database.ListCollectionNames(ctx, bson.M{})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", "error obteniendo colecciones: "+err.Error())
+			return
+		}
+
+		var collectionStats []domain.CollectionStats
+		var totalDocuments int64
+		var totalSize int64
+
+		// Obtener estadísticas de cada colección
+		for _, collectionName := range collections {
+			collection := database.Collection(collectionName)
+
+			// Contar documentos
+			docCount, err := collection.CountDocuments(ctx, bson.M{})
+			if err != nil {
+				log.Printf("⚠️ Error contando documentos en colección %s: %v", collectionName, err)
+				docCount = 0
+			}
+
+			// Obtener estadísticas de la colección
+			var stats bson.M
+			err = database.RunCommand(ctx, bson.M{"collStats": collectionName}).Decode(&stats)
+			if err != nil {
+				log.Printf("⚠️ Error obteniendo estadísticas de colección %s: %v", collectionName, err)
+				stats = bson.M{"size": 0}
+			}
+
+			size := int64(0)
+			if sizeVal, ok := stats["size"].(int32); ok {
+				size = int64(sizeVal)
+			} else if sizeVal, ok := stats["size"].(int64); ok {
+				size = sizeVal
+			}
+
+			collectionStats = append(collectionStats, domain.CollectionStats{
+				Name:          collectionName,
+				DocumentCount: docCount,
+				Size:          size,
+			})
+
+			totalDocuments += docCount
+			totalSize += size
+		}
+
+		response := domain.DatabaseStats{
+			DatabaseName:   cfg.DBName,
+			TotalSize:      totalSize,
+			Collections:    collectionStats,
+			TotalDocuments: totalDocuments,
+		}
+
+		log.Printf("✅ AdminDatabaseStats - Estadísticas obtenidas: %d colecciones, %d documentos, %d bytes", len(collectionStats), totalDocuments, totalSize)
+		writeJSON(w, http.StatusOK, response)
 	}
+}
+
+// AdminDatabaseDownload - Descargar backup de la base de datos
+func AdminDatabaseDownload(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Crear directorio temporal único
+		tempDir := fmt.Sprintf("/tmp/mongodb_backup_%d", time.Now().Unix())
+		err := os.MkdirAll(tempDir, 0755)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", "error creando directorio temporal: "+err.Error())
+			return
+		}
+
+		// Limpiar directorio temporal al final
+		defer func() {
+			if err := os.RemoveAll(tempDir); err != nil {
+				log.Printf("⚠️ Error limpiando directorio temporal %s: %v", tempDir, err)
+			}
+		}()
+
+		// Verificar que mongodump esté disponible
+		_, err = exec.LookPath("mongodump")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", "mongodump no está disponible en el sistema")
+			return
+		}
+
+		// Construir comando mongodump
+		cmd := exec.Command("mongodump", 
+			"--uri", cfg.DBURL,
+			"--db", cfg.DBName,
+			"--out", tempDir,
+		)
+
+		// Ejecutar mongodump con timeout
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+		defer cancel()
+
+		cmd = exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("❌ Error ejecutando mongodump: %v, output: %s", err, string(output))
+			writeError(w, http.StatusInternalServerError, "server_error", "error ejecutando mongodump: "+err.Error())
+			return
+		}
+
+		log.Printf("✅ AdminDatabaseDownload - mongodump ejecutado exitosamente")
+
+		// Crear archivo tar.gz
+		backupFileName := fmt.Sprintf("mongodb_backup_%s_%d.tar.gz", cfg.DBName, time.Now().Unix())
+		backupPath := filepath.Join(tempDir, backupFileName)
+
+		err = createTarGz(backupPath, tempDir)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", "error creando archivo de backup: "+err.Error())
+			return
+		}
+
+		// Configurar headers para descarga
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", backupFileName))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", getFileSize(backupPath)))
+
+		// Enviar archivo
+		file, err := os.Open(backupPath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", "error abriendo archivo de backup: "+err.Error())
+			return
+		}
+		defer file.Close()
+
+		_, err = io.Copy(w, file)
+		if err != nil {
+			log.Printf("❌ Error enviando archivo de backup: %v", err)
+			return
+		}
+
+		log.Printf("✅ AdminDatabaseDownload - Backup enviado exitosamente: %s", backupFileName)
+	}
+}
+
+// createTarGz crea un archivo tar.gz con el contenido del directorio
+func createTarGz(tarGzPath, sourceDir string) error {
+	file, err := os.Create(tarGzPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	gzWriter := gzip.NewWriter(file)
+	defer gzWriter.Close()
+
+	tarWriter := tar.NewWriter(gzWriter)
+	defer tarWriter.Close()
+
+	return filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Saltar el archivo tar.gz que estamos creando
+		if strings.HasSuffix(path, ".tar.gz") {
+			return nil
+		}
+
+		header, err := tar.FileInfoHeader(info, info.Name())
+		if err != nil {
+			return err
+		}
+
+		// Ajustar el nombre del archivo en el tar
+		relPath, err := filepath.Rel(sourceDir, path)
+		if err != nil {
+			return err
+		}
+		header.Name = relPath
+
+		if err := tarWriter.WriteHeader(header); err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		_, err = io.Copy(tarWriter, file)
+		return err
+	})
+}
+
+// getFileSize obtiene el tamaño de un archivo
+func getFileSize(filePath string) int64 {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return 0
+	}
+
+	return stat.Size()
 }
