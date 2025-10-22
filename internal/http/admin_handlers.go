@@ -1864,10 +1864,11 @@ func AdminProvidersDelete(cfg config.Config) http.HandlerFunc {
 
 		log.Printf("✅ AdminProvidersDelete - Proveedor %s eliminado", id)
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message":   "Proveedor eliminado exitosamente",
-		"deletedId": id,
-	})
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"message":   "Proveedor eliminado exitosamente",
+			"deletedId": id,
+		})
+	}
 }
 
 // ========== Handlers de Base de Datos ==========
