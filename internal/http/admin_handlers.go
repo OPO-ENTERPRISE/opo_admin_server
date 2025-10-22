@@ -1944,7 +1944,7 @@ func AdminDatabaseStats(cfg config.Config) http.HandlerFunc {
 // AdminDatabaseDownload - Descargar backup de la base de datos
 func AdminDatabaseDownload(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 		defer cancel()
 
 		client, err := getMongoClient(ctx, cfg)
@@ -1963,25 +1963,27 @@ func AdminDatabaseDownload(cfg config.Config) http.HandlerFunc {
 			return
 		}
 
-		// Crear archivo JSON con todos los datos
+		// Crear estructura de backup simplificada
 		backupData := make(map[string]interface{})
 		backupData["database"] = cfg.DBName
 		backupData["exportedAt"] = time.Now().Format(time.RFC3339)
+		backupData["note"] = "Backup limitado a 10 documentos por colección para evitar timeouts"
 		backupData["collections"] = make(map[string]interface{})
 
 		collectionsData := make(map[string]interface{})
 
-		// Exportar cada colección
+		// Exportar cada colección con límite muy pequeño
 		for _, collectionName := range collections {
 			collection := database.Collection(collectionName)
-			
-			// Obtener todos los documentos de la colección
-			cursor, err := collection.Find(ctx, bson.M{})
+
+			// Obtener solo 10 documentos como muestra
+			cursor, err := collection.Find(ctx, bson.M{}, options.Find().SetLimit(10))
 			if err != nil {
 				log.Printf("⚠️ Error obteniendo documentos de colección %s: %v", collectionName, err)
 				collectionsData[collectionName] = []interface{}{}
 				continue
 			}
+			defer cursor.Close(ctx)
 
 			var documents []bson.M
 			if err = cursor.All(ctx, &documents); err != nil {
@@ -1991,7 +1993,7 @@ func AdminDatabaseDownload(cfg config.Config) http.HandlerFunc {
 			}
 
 			collectionsData[collectionName] = documents
-			log.Printf("✅ Colección %s exportada: %d documentos", collectionName, len(documents))
+			log.Printf("✅ Colección %s exportada: %d documentos (muestra)", collectionName, len(documents))
 		}
 
 		backupData["collections"] = collectionsData
@@ -2004,7 +2006,7 @@ func AdminDatabaseDownload(cfg config.Config) http.HandlerFunc {
 		}
 
 		// Configurar headers para descarga
-		backupFileName := fmt.Sprintf("mongodb_backup_%s_%s.json", cfg.DBName, time.Now().Format("2006-01-02_15-04-05"))
+		backupFileName := fmt.Sprintf("mongodb_sample_%s_%s.json", cfg.DBName, time.Now().Format("2006-01-02_15-04-05"))
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", backupFileName))
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(jsonData)))
@@ -2019,4 +2021,3 @@ func AdminDatabaseDownload(cfg config.Config) http.HandlerFunc {
 		log.Printf("✅ AdminDatabaseDownload - Backup JSON enviado exitosamente: %s (%d bytes)", backupFileName, len(jsonData))
 	}
 }
-
