@@ -20,6 +20,8 @@ db.apps.insertMany([
     "id": "1",
     "name": "Policía Nacional",
     "description": "Área policía nacional",
+    "enabled": false, // Lógica invertida: false = habilitado
+    "order": 1,
     "createdAt": new Date().toISOString(),
     "updatedAt": new Date().toISOString()
   },
@@ -28,6 +30,8 @@ db.apps.insertMany([
     "id": "2",
     "name": "Policía Local/Guardia Civil",
     "description": "Área policía local y guardia civil",
+    "enabled": false, // Lógica invertida: false = habilitado
+    "order": 2,
     "createdAt": new Date().toISOString(),
     "updatedAt": new Date().toISOString()
   }

@@ -71,6 +71,16 @@ type PaginatedResponse struct {
 	Pagination PaginationInfo `json:"pagination"`
 }
 
+// CreateTopicRequest representa los datos para crear un nuevo topic
+type CreateTopicRequest struct {
+	Title       string `json:"title"`
+	Area        int    `json:"area"`
+	Type        string `json:"type"`
+	Order       int    `json:"order"`
+	Description string `json:"description,omitempty"`
+	ImageURL    string `json:"imageUrl,omitempty"`
+}
+
 // IsMainTopic determina si un topic es principal (id === rootId)
 func (t *Topic) IsMainTopic() bool {
 	return t.TopicID == t.RootID

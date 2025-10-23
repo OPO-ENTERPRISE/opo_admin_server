@@ -450,7 +450,7 @@ func AdminTopicsGetSubtopics(cfg config.Config) http.HandlerFunc {
 // AdminTopicsCreate - Crear nuevo topic
 func AdminTopicsCreate(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var req domain.Topic
+		var req domain.CreateTopicRequest
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_request", "invalid json")
@@ -458,13 +458,13 @@ func AdminTopicsCreate(cfg config.Config) http.HandlerFunc {
 		}
 
 		// Validaciones básicas
-		if req.TopicID == 0 || req.UUID == "" || req.Title == "" || req.Area == 0 {
-			writeError(w, http.StatusUnprocessableEntity, "validation_error", "id, uuid, title y area requeridos")
+		if req.Title == "" || req.Area == 0 {
+			writeError(w, http.StatusUnprocessableEntity, "validation_error", "title y area son requeridos")
 			return
 		}
 
-		if req.Area != 1 && req.Area != 2 {
-			writeError(w, http.StatusUnprocessableEntity, "validation_error", "area debe ser 1 o 2")
+		if req.Area < 1 || req.Area > 10 {
+			writeError(w, http.StatusUnprocessableEntity, "validation_error", "area debe ser entre 1 y 10")
 			return
 		}
 
@@ -490,33 +490,50 @@ func AdminTopicsCreate(cfg config.Config) http.HandlerFunc {
 
 		col := client.Database(cfg.DBName).Collection("topics_uuid_map")
 
-		// Verificar que no existe
-		var existing domain.Topic
-		if err := col.FindOne(ctx, bson.M{"id": req.TopicID}).Decode(&existing); err == nil {
-			writeError(w, http.StatusConflict, "topic_exists", "topic con este ID ya existe")
-			return
-		}
+		// Generar ID único para el topic
+		// Buscar el siguiente ID disponible
+		var maxTopic domain.Topic
+		opts := options.FindOne().SetSort(bson.D{{Key: "id", Value: -1}})
+		err = col.FindOne(ctx, bson.M{}, opts).Decode(&maxTopic)
 
-		// Si es un tema principal, rootId = id
-		if req.RootID == 0 {
-			req.RootID = req.TopicID
-		}
-		if req.RootUUID == "" {
-			req.RootUUID = req.UUID
-		}
-
-		now := time.Now()
-		req.ID = uuid.NewString()
-		req.CreatedAt = now
-		req.UpdatedAt = now
-
-		if _, err := col.InsertOne(ctx, req); err != nil {
+		nextID := 1
+		if err == nil && maxTopic.TopicID > 0 {
+			nextID = maxTopic.TopicID + 1
+		} else if err != nil && err != mongo.ErrNoDocuments {
 			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
 			return
 		}
 
-		log.Printf("✅ AdminTopicsCreate - Topic %d creado con type: %s", req.TopicID, req.Type)
-		writeJSON(w, http.StatusCreated, req)
+		// Generar UUID único
+		topicUUID := uuid.NewString()
+
+		// Crear el topic completo
+		now := time.Now()
+		topic := domain.Topic{
+			ID:          uuid.NewString(),
+			TopicID:     nextID,
+			UUID:        topicUUID,
+			RootID:      nextID,    // Para tema principal, rootId = id
+			RootUUID:    topicUUID, // Para tema principal, rootUuid = uuid
+			Area:        req.Area,
+			Title:       req.Title,
+			Description: req.Description,
+			ImageURL:    req.ImageURL,
+			Enabled:     true,  // Por defecto habilitado
+			Premium:     false, // Por defecto no premium
+			Type:        req.Type,
+			Order:       req.Order,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+
+		if _, err := col.InsertOne(ctx, topic); err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		log.Printf("✅ AdminTopicsCreate - Topic %d creado con type: %s, área: %d", topic.TopicID, topic.Type, topic.Area)
+		writeJSON(w, http.StatusCreated, topic)
 	}
 }
 
@@ -541,8 +558,8 @@ func AdminTopicsUpdate(cfg config.Config) http.HandlerFunc {
 
 		// Validar área si se proporciona
 		if req.Area != 0 {
-			if req.Area != 1 && req.Area != 2 {
-				writeError(w, http.StatusUnprocessableEntity, "validation_error", "area debe ser 1 o 2")
+			if req.Area < 1 || req.Area > 10 {
+				writeError(w, http.StatusUnprocessableEntity, "validation_error", "area debe ser entre 1 y 10")
 				return
 			}
 		}
@@ -1221,6 +1238,9 @@ func AdminAreasCreate(cfg config.Config) http.HandlerFunc {
 		// Generar ID numérico secuencial
 		count, _ := col.CountDocuments(ctx, bson.M{})
 		req.ID = strconv.FormatInt(count+1, 10)
+
+		// Establecer enabled como false por defecto (lógica invertida: false = habilitado)
+		req.Enabled = false
 
 		req.CreatedAt = now
 		req.UpdatedAt = now
