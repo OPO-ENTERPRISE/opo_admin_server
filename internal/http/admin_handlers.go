@@ -2077,6 +2077,8 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 			return
 		}
 
+		log.Printf("🔍 AdminGetAvailableSourceTopics - Buscando temas origen para topicId: %d", topicId)
+
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 
@@ -2095,22 +2097,31 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 		var destTopic domain.Topic
 		if err := topicsCol.FindOne(ctx, bson.M{"id": topicId}).Decode(&destTopic); err != nil {
 			if err == mongo.ErrNoDocuments {
+				log.Printf("❌ AdminGetAvailableSourceTopics - Tema destino %d no encontrado", topicId)
 				writeError(w, http.StatusNotFound, "topic_not_found", "tema destino no encontrado")
 				return
 			}
+			log.Printf("❌ AdminGetAvailableSourceTopics - Error buscando tema destino %d: %v", topicId, err)
 			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
 			return
 		}
 
+		log.Printf("✅ AdminGetAvailableSourceTopics - Tema destino encontrado: ID=%d, Área=%d, Title=%s", destTopic.TopicID, destTopic.Area, destTopic.Title)
+
 		// 2. Buscar temas principales de OTRAS áreas (excluyendo la del tema destino)
 		filter := bson.M{
-			"area":    bson.M{"$ne": destTopic.Area},                                                  // Excluir el área del tema destino
-			"id":      bson.M{"$eq": bson.M{"$expr": bson.M{"$eq": []interface{}{"$id", "$rootId"}}}}, // Solo temas principales
-			"enabled": true,                                                                           // Solo temas habilitados
+			"area":    bson.M{"$ne": destTopic.Area}, // Excluir el área del tema destino
+			"enabled": true,                          // Solo temas habilitados
 		}
+
+		// Añadir condición para temas principales usando $expr
+		filter["$expr"] = bson.M{"$eq": []interface{}{"$id", "$rootId"}}
+
+		log.Printf("🔍 AdminGetAvailableSourceTopics - Filtro de búsqueda: %+v", filter)
 
 		cur, err := topicsCol.Find(ctx, filter)
 		if err != nil {
+			log.Printf("❌ AdminGetAvailableSourceTopics - Error en consulta Find: %v", err)
 			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
 			return
 		}
@@ -2118,9 +2129,12 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 
 		var mainTopics []domain.Topic
 		if err := cur.All(ctx, &mainTopics); err != nil {
+			log.Printf("❌ AdminGetAvailableSourceTopics - Error en cur.All: %v", err)
 			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
 			return
 		}
+
+		log.Printf("🔍 AdminGetAvailableSourceTopics - Encontrados %d temas principales de otras áreas", len(mainTopics))
 
 		// 3. Para cada tema principal, contar subtemas y preguntas
 		var sourceTopics []domain.SourceTopicInfo
@@ -2176,6 +2190,7 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 			sourceTopics = append(sourceTopics, sourceTopic)
 		}
 
+		log.Printf("✅ AdminGetAvailableSourceTopics - Devolviendo %d temas origen", len(sourceTopics))
 		writeJSON(w, http.StatusOK, sourceTopics)
 	}
 }
