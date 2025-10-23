@@ -2046,3 +2046,336 @@ func AdminDatabaseDownload(cfg config.Config) http.HandlerFunc {
 		log.Printf("✅ AdminDatabaseDownload - Backup JSON enviado exitosamente: %s", backupFileName)
 	}
 }
+
+// AdminGetAvailableSourceTopics - Obtener temas disponibles de otras áreas como fuente de preguntas
+func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		topicIdStr := chi.URLParam(r, "id")
+		topicId, err := strconv.Atoi(topicIdStr)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_topic_id", "topic ID debe ser un número")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+
+		client, err := getMongoClient(ctx, cfg)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer client.Disconnect(context.Background())
+
+		db := client.Database(cfg.DBName)
+		topicsCol := db.Collection("topics_uuid_map")
+		questionsUnitsCol := db.Collection("questions_units_uuid")
+
+		// 1. Obtener el tema destino para conocer su área
+		var destTopic domain.Topic
+		if err := topicsCol.FindOne(ctx, bson.M{"id": topicId}).Decode(&destTopic); err != nil {
+			if err == mongo.ErrNoDocuments {
+				writeError(w, http.StatusNotFound, "topic_not_found", "tema destino no encontrado")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		// 2. Buscar temas principales de OTRAS áreas (excluyendo la del tema destino)
+		filter := bson.M{
+			"area":    bson.M{"$ne": destTopic.Area},                                                  // Excluir el área del tema destino
+			"id":      bson.M{"$eq": bson.M{"$expr": bson.M{"$eq": []interface{}{"$id", "$rootId"}}}}, // Solo temas principales
+			"enabled": true,                                                                           // Solo temas habilitados
+		}
+
+		cur, err := topicsCol.Find(ctx, filter)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer cur.Close(ctx)
+
+		var mainTopics []domain.Topic
+		if err := cur.All(ctx, &mainTopics); err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		// 3. Para cada tema principal, contar subtemas y preguntas
+		var sourceTopics []domain.SourceTopicInfo
+		for _, topic := range mainTopics {
+			// Contar subtemas
+			subtopicFilter := bson.M{
+				"rootUuid": topic.UUID,
+				"enabled":  true,
+			}
+			subtopicCount, err := topicsCol.CountDocuments(ctx, subtopicFilter)
+			if err != nil {
+				log.Printf("Error contando subtemas para topic %s: %v", topic.UUID, err)
+				subtopicCount = 0
+			}
+
+			// Obtener todos los UUIDs del tema (principal + subtemas)
+			var allUuids []string
+			allUuids = append(allUuids, topic.UUID) // Añadir tema principal
+
+			// Añadir subtemas
+			subtopicCur, err := topicsCol.Find(ctx, subtopicFilter)
+			if err == nil {
+				var subtopics []domain.Topic
+				if err := subtopicCur.All(ctx, &subtopics); err == nil {
+					for _, subtopic := range subtopics {
+						allUuids = append(allUuids, subtopic.UUID)
+					}
+				}
+				subtopicCur.Close(ctx)
+			}
+
+			// Contar preguntas totales (principal + subtemas)
+			questionCount := int64(0)
+			if len(allUuids) > 0 {
+				questionFilter := bson.M{"topicUuid": bson.M{"$in": allUuids}}
+				questionCount, err = questionsUnitsCol.CountDocuments(ctx, questionFilter)
+				if err != nil {
+					log.Printf("Error contando preguntas para topic %s: %v", topic.UUID, err)
+					questionCount = 0
+				}
+			}
+
+			sourceTopic := domain.SourceTopicInfo{
+				TopicID:       topic.TopicID,
+				UUID:          topic.UUID,
+				Title:         topic.Title,
+				Area:          topic.Area,
+				IsMain:        true,
+				SubtopicCount: int(subtopicCount),
+				QuestionCount: int(questionCount),
+			}
+
+			sourceTopics = append(sourceTopics, sourceTopic)
+		}
+
+		writeJSON(w, http.StatusOK, sourceTopics)
+	}
+}
+
+// AdminCopyQuestionsFromTopics - Copiar preguntas desde temas origen al tema destino
+func AdminCopyQuestionsFromTopics(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		topicIdStr := chi.URLParam(r, "id")
+		topicId, err := strconv.Atoi(topicIdStr)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_topic_id", "topic ID debe ser un número")
+			return
+		}
+
+		var req domain.CopyQuestionsRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "JSON inválido")
+			return
+		}
+
+		if len(req.SourceTopicUuids) == 0 {
+			writeError(w, http.StatusUnprocessableEntity, "validation_error", "debe seleccionar al menos un tema origen")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
+		client, err := getMongoClient(ctx, cfg)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer client.Disconnect(context.Background())
+
+		db := client.Database(cfg.DBName)
+		topicsCol := db.Collection("topics_uuid_map")
+		questionsUnitsCol := db.Collection("questions_units_uuid")
+		questionsCol := db.Collection("questions")
+
+		// 1. Validar que el tema destino existe y obtener su información
+		var destTopic domain.Topic
+		if err := topicsCol.FindOne(ctx, bson.M{"id": topicId}).Decode(&destTopic); err != nil {
+			if err == mongo.ErrNoDocuments {
+				writeError(w, http.StatusNotFound, "topic_not_found", "tema destino no encontrado")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		// 2. Validar que los temas origen existen y son principales
+		var sourceTopics []domain.Topic
+		for _, uuid := range req.SourceTopicUuids {
+			var topic domain.Topic
+			if err := topicsCol.FindOne(ctx, bson.M{"uuid": uuid}).Decode(&topic); err != nil {
+				if err == mongo.ErrNoDocuments {
+					writeError(w, http.StatusUnprocessableEntity, "source_topic_not_found", fmt.Sprintf("tema origen con UUID %s no encontrado", uuid))
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+				return
+			}
+
+			// Verificar que es tema principal
+			if !topic.IsMainTopic() {
+				writeError(w, http.StatusUnprocessableEntity, "not_main_topic", fmt.Sprintf("el tema %s no es un tema principal", topic.Title))
+				return
+			}
+
+			// Verificar que no es del mismo área
+			if topic.Area == destTopic.Area {
+				writeError(w, http.StatusUnprocessableEntity, "same_area", fmt.Sprintf("no se puede copiar desde el mismo área (%d)", topic.Area))
+				return
+			}
+
+			sourceTopics = append(sourceTopics, topic)
+		}
+
+		// 3. Recopilar todos los UUIDs de temas origen (principal + subtemas)
+		var allSourceUuids []string
+		for _, topic := range sourceTopics {
+			allSourceUuids = append(allSourceUuids, topic.UUID)
+
+			// Añadir subtemas
+			subtopicFilter := bson.M{
+				"rootUuid": topic.UUID,
+				"enabled":  true,
+			}
+			subtopicCur, err := topicsCol.Find(ctx, subtopicFilter)
+			if err == nil {
+				var subtopics []domain.Topic
+				if err := subtopicCur.All(ctx, &subtopics); err == nil {
+					for _, subtopic := range subtopics {
+						allSourceUuids = append(allSourceUuids, subtopic.UUID)
+					}
+				}
+				subtopicCur.Close(ctx)
+			}
+		}
+
+		// 4. Obtener todas las preguntas de los temas origen
+		questionUnitsFilter := bson.M{"topicUuid": bson.M{"$in": allSourceUuids}}
+		questionUnitsCur, err := questionsUnitsCol.Find(ctx, questionUnitsFilter)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer questionUnitsCur.Close(ctx)
+
+		type QuestionUnit struct {
+			TopicID    int    `bson:"topicId"`
+			TopicUuid  string `bson:"topicUuid"`
+			QuestionId int    `bson:"questionId"`
+			Area       int    `bson:"area"`
+		}
+
+		var questionUnits []QuestionUnit
+		if err := questionUnitsCur.All(ctx, &questionUnits); err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		if len(questionUnits) == 0 {
+			writeError(w, http.StatusUnprocessableEntity, "no_questions", "no hay preguntas disponibles en los temas seleccionados")
+			return
+		}
+
+		// 5. Verificar que las preguntas existen en la colección questions
+		var questionIds []int
+		for _, unit := range questionUnits {
+			questionIds = append(questionIds, unit.QuestionId)
+		}
+
+		// Eliminar duplicados
+		questionIdMap := make(map[int]bool)
+		var uniqueQuestionIds []int
+		for _, id := range questionIds {
+			if !questionIdMap[id] {
+				questionIdMap[id] = true
+				uniqueQuestionIds = append(uniqueQuestionIds, id)
+			}
+		}
+
+		// Verificar existencia en questions
+		questionsFilter := bson.M{"questionId": bson.M{"$in": uniqueQuestionIds}}
+		questionsCount, err := questionsCol.CountDocuments(ctx, questionsFilter)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		if questionsCount == 0 {
+			writeError(w, http.StatusUnprocessableEntity, "questions_not_found", "las preguntas no existen en la base de datos")
+			return
+		}
+
+		// 6. Verificar qué preguntas ya existen en el tema destino
+		existingFilter := bson.M{
+			"topicUuid":  destTopic.UUID,
+			"questionId": bson.M{"$in": uniqueQuestionIds},
+		}
+		existingCur, err := questionsUnitsCol.Find(ctx, existingFilter)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer existingCur.Close(ctx)
+
+		var existingUnits []QuestionUnit
+		if err := existingCur.All(ctx, &existingUnits); err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		// Crear mapa de questionIds existentes
+		existingQuestionIds := make(map[int]bool)
+		for _, unit := range existingUnits {
+			existingQuestionIds[unit.QuestionId] = true
+		}
+
+		// 7. Preparar documentos para insertar (solo los que no existen)
+		var documentsToInsert []interface{}
+		questionsCopied := 0
+
+		for _, questionId := range uniqueQuestionIds {
+			if !existingQuestionIds[questionId] {
+				doc := bson.M{
+					"topicId":    destTopic.TopicID,
+					"topicUuid":  destTopic.UUID,
+					"questionId": questionId,
+					"area":       destTopic.Area,
+				}
+				documentsToInsert = append(documentsToInsert, doc)
+				questionsCopied++
+			}
+		}
+
+		// 8. Insertar documentos usando bulkWrite
+		if len(documentsToInsert) > 0 {
+			var operations []mongo.WriteModel
+			for _, doc := range documentsToInsert {
+				operation := mongo.NewInsertOneModel().SetDocument(doc)
+				operations = append(operations, operation)
+			}
+
+			_, err = questionsUnitsCol.BulkWrite(ctx, operations)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+				return
+			}
+		}
+
+		// 9. Preparar respuesta
+		response := domain.CopyQuestionsResponse{
+			Message:         fmt.Sprintf("Se copiaron %d preguntas desde %d temas", questionsCopied, len(sourceTopics)),
+			QuestionsCopied: questionsCopied,
+			TopicsProcessed: len(sourceTopics),
+		}
+
+		writeJSON(w, http.StatusOK, response)
+	}
+}

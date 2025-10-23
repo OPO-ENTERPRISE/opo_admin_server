@@ -136,3 +136,26 @@ type ErrorResponse struct {
 	Message string `json:"message"`
 	Details any    `json:"details,omitempty"`
 }
+
+// SourceTopicInfo para mostrar temas disponibles de otras áreas
+type SourceTopicInfo struct {
+	TopicID       int    `json:"topicId"`
+	UUID          string `json:"uuid"`
+	Title         string `json:"title"`
+	Area          int    `json:"area"`
+	IsMain        bool   `json:"isMain"`
+	SubtopicCount int    `json:"subtopicCount"`
+	QuestionCount int    `json:"questionCount"`
+}
+
+// CopyQuestionsRequest para copiar preguntas desde temas origen
+type CopyQuestionsRequest struct {
+	SourceTopicUuids []string `json:"sourceTopicUuids"` // UUIDs de temas principales origen
+}
+
+// CopyQuestionsResponse respuesta de la operación
+type CopyQuestionsResponse struct {
+	Message         string `json:"message"`
+	QuestionsCopied int    `json:"questionsCopied"`
+	TopicsProcessed int    `json:"topicsProcessed"`
+}

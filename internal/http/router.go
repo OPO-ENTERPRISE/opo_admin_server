@@ -83,6 +83,10 @@ func NewRouter(cfg config.Config) http.Handler {
 		r.Patch("/topics/{id}/enabled", AdminTopicsToggleEnabled(cfg))
 		r.Patch("/topics/{id}/premium", AdminTopicsTogglePremium(cfg))
 		r.Delete("/topics/{id}", AdminTopicsDelete(cfg))
+		
+		// Gestión de preguntas de topics
+		r.Get("/topics/{id}/available-sources", AdminGetAvailableSourceTopics(cfg))
+		r.Post("/topics/{id}/copy-questions", AdminCopyQuestionsFromTopics(cfg))
 
 		// Administración de áreas
 		r.Get("/areas", AdminAreasList(cfg))
