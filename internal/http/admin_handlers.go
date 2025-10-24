@@ -1890,7 +1890,7 @@ func AdminProvidersDelete(cfg config.Config) http.HandlerFunc {
 // AdminDatabaseStats - Obtener estadísticas de la base de datos
 func AdminDatabaseStats(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
 
 		client, err := getMongoClient(ctx, cfg)
@@ -2155,15 +2155,22 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 			allUuids = append(allUuids, topic.UUID) // Añadir tema principal
 
 			// Añadir subtemas
+			log.Printf("🔍 AdminGetAvailableSourceTopics - Buscando subtemas para topic %s con rootUuid: %s", topic.Title, topic.UUID)
 			subtopicCur, err := topicsCol.Find(ctx, subtopicFilter)
 			if err == nil {
 				var subtopics []domain.Topic
 				if err := subtopicCur.All(ctx, &subtopics); err == nil {
+					log.Printf("🔍 AdminGetAvailableSourceTopics - Encontrados %d subtemas para topic %s", len(subtopics), topic.Title)
 					for _, subtopic := range subtopics {
+						log.Printf("  - Subtema: %s (UUID: %s, rootUuid: %s)", subtopic.Title, subtopic.UUID, subtopic.RootUUID)
 						allUuids = append(allUuids, subtopic.UUID)
 					}
+				} else {
+					log.Printf("❌ Error en cur.All para subtemas de topic %s: %v", topic.Title, err)
 				}
 				subtopicCur.Close(ctx)
+			} else {
+				log.Printf("❌ Error buscando subtemas para topic %s: %v", topic.Title, err)
 			}
 
 			// Contar preguntas totales (principal + subtemas)
@@ -2220,7 +2227,7 @@ func AdminCopyQuestionsFromTopics(cfg config.Config) http.HandlerFunc {
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
 
 		client, err := getMongoClient(ctx, cfg)
