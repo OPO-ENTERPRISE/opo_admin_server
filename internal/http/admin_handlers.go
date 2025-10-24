@@ -2111,7 +2111,7 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 		// 2. Buscar temas principales de OTRAS áreas (excluyendo la del tema destino)
 		filter := bson.M{
 			"area":    bson.M{"$ne": destTopic.Area}, // Excluir el área del tema destino
-			"enabled": true,                          // Solo temas habilitados
+			"enabled": false,                         // Solo temas habilitados (lógica invertida)
 		}
 
 		// Añadir condición para temas principales usando $expr
@@ -2142,7 +2142,7 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 			// Contar subtemas
 			subtopicFilter := bson.M{
 				"rootUuid": topic.UUID,
-				"enabled":  true,
+				"enabled":  false, // Lógica invertida
 			}
 			subtopicCount, err := topicsCol.CountDocuments(ctx, subtopicFilter)
 			if err != nil {
