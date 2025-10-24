@@ -2278,7 +2278,7 @@ func AdminCopyQuestionsFromTopics(cfg config.Config) http.HandlerFunc {
 			// Añadir subtemas
 			subtopicFilter := bson.M{
 				"rootUuid": topic.UUID,
-				"enabled":  true,
+				"enabled":  false, // Lógica invertida
 			}
 			subtopicCur, err := topicsCol.Find(ctx, subtopicFilter)
 			if err == nil {
@@ -2293,9 +2293,13 @@ func AdminCopyQuestionsFromTopics(cfg config.Config) http.HandlerFunc {
 		}
 
 		// 4. Obtener todas las preguntas de los temas origen
+		log.Printf("🔍 AdminCopyQuestionsFromTopics - UUIDs de temas origen: %+v", allSourceUuids)
 		questionUnitsFilter := bson.M{"topicUuid": bson.M{"$in": allSourceUuids}}
+		log.Printf("🔍 AdminCopyQuestionsFromTopics - Filtro questions_units_uuid: %+v", questionUnitsFilter)
+
 		questionUnitsCur, err := questionsUnitsCol.Find(ctx, questionUnitsFilter)
 		if err != nil {
+			log.Printf("❌ AdminCopyQuestionsFromTopics - Error en consulta questions_units_uuid: %v", err)
 			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
 			return
 		}
@@ -2310,11 +2314,15 @@ func AdminCopyQuestionsFromTopics(cfg config.Config) http.HandlerFunc {
 
 		var questionUnits []QuestionUnit
 		if err := questionUnitsCur.All(ctx, &questionUnits); err != nil {
+			log.Printf("❌ AdminCopyQuestionsFromTopics - Error en cur.All: %v", err)
 			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
 			return
 		}
 
+		log.Printf("🔍 AdminCopyQuestionsFromTopics - Encontradas %d unidades de preguntas", len(questionUnits))
+
 		if len(questionUnits) == 0 {
+			log.Printf("❌ AdminCopyQuestionsFromTopics - No hay preguntas en los temas seleccionados")
 			writeError(w, http.StatusUnprocessableEntity, "no_questions", "no hay preguntas disponibles en los temas seleccionados")
 			return
 		}
