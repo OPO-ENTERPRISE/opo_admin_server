@@ -2170,10 +2170,14 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 			questionCount := int64(0)
 			if len(allUuids) > 0 {
 				questionFilter := bson.M{"topicUuid": bson.M{"$in": allUuids}}
+				log.Printf("🔍 AdminGetAvailableSourceTopics - Contando preguntas para topic %s con UUIDs: %+v", topic.Title, allUuids)
+				log.Printf("🔍 AdminGetAvailableSourceTopics - Filtro questions_units_uuid: %+v", questionFilter)
 				questionCount, err = questionsUnitsCol.CountDocuments(ctx, questionFilter)
 				if err != nil {
-					log.Printf("Error contando preguntas para topic %s: %v", topic.UUID, err)
+					log.Printf("❌ Error contando preguntas para topic %s: %v", topic.UUID, err)
 					questionCount = 0
+				} else {
+					log.Printf("✅ AdminGetAvailableSourceTopics - Topic %s tiene %d preguntas", topic.Title, questionCount)
 				}
 			}
 
