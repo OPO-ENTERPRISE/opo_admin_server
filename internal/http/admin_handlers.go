@@ -2109,13 +2109,12 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 		log.Printf("✅ AdminGetAvailableSourceTopics - Tema destino encontrado: ID=%d, Área=%d, Title=%s", destTopic.TopicID, destTopic.Area, destTopic.Title)
 
 		// 2. Buscar temas principales de OTRAS áreas (excluyendo la del tema destino)
+		// Tema principal: id == rootId
 		filter := bson.M{
-			"area":    bson.M{"$ne": destTopic.Area}, // Excluir el área del tema destino
-			"enabled": false,                         // Solo temas habilitados (lógica invertida)
+			"area":    bson.M{"$ne": destTopic.Area},                  // Excluir el área del tema destino
+			"enabled": false,                                          // Solo temas habilitados (lógica invertida)
+			"$expr":   bson.M{"$eq": []interface{}{"$id", "$rootId"}}, // id == rootId (tema principal)
 		}
-
-		// Añadir condición para temas principales usando $expr
-		filter["$expr"] = bson.M{"$eq": []interface{}{"$id", "$rootId"}}
 
 		log.Printf("🔍 AdminGetAvailableSourceTopics - Filtro de búsqueda: %+v", filter)
 
@@ -2139,10 +2138,10 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 		// 3. Para cada tema principal, contar subtemas y preguntas
 		var sourceTopics []domain.SourceTopicInfo
 		for _, topic := range mainTopics {
-			// Contar subtemas
+			// Contar subtemas: rootId == id del tema principal
 			subtopicFilter := bson.M{
-				"rootUuid": topic.UUID,
-				"enabled":  false, // Lógica invertida
+				"rootId":  topic.TopicID, // rootId debe ser igual al id del tema principal
+				"enabled": false,         // Lógica invertida
 			}
 			subtopicCount, err := topicsCol.CountDocuments(ctx, subtopicFilter)
 			if err != nil {
@@ -2150,12 +2149,12 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 				subtopicCount = 0
 			}
 
-			// Obtener todos los UUIDs del tema (principal + subtemas)
-			var allUuids []string
-			allUuids = append(allUuids, topic.UUID) // Añadir tema principal
+			// Obtener todos los IDs del tema (principal + subtemas)
+			var allTopicIds []int
+			allTopicIds = append(allTopicIds, topic.TopicID) // Añadir tema principal
 
 			// Añadir subtemas
-			log.Printf("🔍 AdminGetAvailableSourceTopics - Buscando subtemas para topic %s con rootUuid: %s", topic.Title, topic.UUID)
+			log.Printf("🔍 AdminGetAvailableSourceTopics - Buscando subtemas para topic %s con rootId: %d", topic.Title, topic.TopicID)
 			log.Printf("🔍 AdminGetAvailableSourceTopics - Filtro subtemas: %+v", subtopicFilter)
 			subtopicCur, err := topicsCol.Find(ctx, subtopicFilter)
 			if err == nil {
@@ -2163,8 +2162,8 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 				if err := subtopicCur.All(ctx, &subtopics); err == nil {
 					log.Printf("🔍 AdminGetAvailableSourceTopics - Encontrados %d subtemas para topic %s", len(subtopics), topic.Title)
 					for _, subtopic := range subtopics {
-						log.Printf("  - Subtema: %s (UUID: %s, rootUuid: %s)", subtopic.Title, subtopic.UUID, subtopic.RootUUID)
-						allUuids = append(allUuids, subtopic.UUID)
+						log.Printf("  - Subtema: %s (ID: %d, rootId: %d)", subtopic.Title, subtopic.TopicID, subtopic.RootID)
+						allTopicIds = append(allTopicIds, subtopic.TopicID)
 					}
 				} else {
 					log.Printf("❌ Error en cur.All para subtemas de topic %s: %v", topic.Title, err)
@@ -2174,18 +2173,18 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 				log.Printf("❌ Error buscando subtemas para topic %s: %v", topic.Title, err)
 			}
 
-			// Verificar si hay algún tema con ese rootUuid (para debugging)
-			debugFilter := bson.M{"rootUuid": topic.UUID}
+			// Verificar si hay algún tema con ese rootId (para debugging)
+			debugFilter := bson.M{"rootId": topic.TopicID}
 			debugCount, debugErr := topicsCol.CountDocuments(ctx, debugFilter)
 			if debugErr == nil {
-				log.Printf("🔍 AdminGetAvailableSourceTopics - Debug: %d temas tienen rootUuid = %s", debugCount, topic.UUID)
+				log.Printf("🔍 AdminGetAvailableSourceTopics - Debug: %d temas tienen rootId = %d", debugCount, topic.TopicID)
 			}
 
 			// Contar preguntas totales (principal + subtemas)
 			questionCount := int64(0)
-			if len(allUuids) > 0 {
-				questionFilter := bson.M{"topicUuid": bson.M{"$in": allUuids}}
-				log.Printf("🔍 AdminGetAvailableSourceTopics - Contando preguntas para topic %s con UUIDs: %+v", topic.Title, allUuids)
+			if len(allTopicIds) > 0 {
+				questionFilter := bson.M{"topicId": bson.M{"$in": allTopicIds}}
+				log.Printf("🔍 AdminGetAvailableSourceTopics - Contando preguntas para topic %s con topicIds: %+v", topic.Title, allTopicIds)
 				log.Printf("🔍 AdminGetAvailableSourceTopics - Filtro questions_units_uuid: %+v", questionFilter)
 				questionCount, err = questionsUnitsCol.CountDocuments(ctx, questionFilter)
 				if err != nil {
