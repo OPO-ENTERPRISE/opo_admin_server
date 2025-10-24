@@ -2156,6 +2156,7 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 
 			// Añadir subtemas
 			log.Printf("🔍 AdminGetAvailableSourceTopics - Buscando subtemas para topic %s con rootUuid: %s", topic.Title, topic.UUID)
+			log.Printf("🔍 AdminGetAvailableSourceTopics - Filtro subtemas: %+v", subtopicFilter)
 			subtopicCur, err := topicsCol.Find(ctx, subtopicFilter)
 			if err == nil {
 				var subtopics []domain.Topic
@@ -2171,6 +2172,13 @@ func AdminGetAvailableSourceTopics(cfg config.Config) http.HandlerFunc {
 				subtopicCur.Close(ctx)
 			} else {
 				log.Printf("❌ Error buscando subtemas para topic %s: %v", topic.Title, err)
+			}
+
+			// Verificar si hay algún tema con ese rootUuid (para debugging)
+			debugFilter := bson.M{"rootUuid": topic.UUID}
+			debugCount, debugErr := topicsCol.CountDocuments(ctx, debugFilter)
+			if debugErr == nil {
+				log.Printf("🔍 AdminGetAvailableSourceTopics - Debug: %d temas tienen rootUuid = %s", debugCount, topic.UUID)
 			}
 
 			// Contar preguntas totales (principal + subtemas)
