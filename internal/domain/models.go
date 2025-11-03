@@ -81,6 +81,15 @@ type CreateTopicRequest struct {
 	ImageURL    string `json:"imageUrl,omitempty"`
 }
 
+// CreateSubtopicRequest representa los datos para crear un nuevo subtopic
+type CreateSubtopicRequest struct {
+	Title       string `json:"title"`
+	Type        string `json:"type,omitempty"` // Opcional, se hereda del parent
+	Order       int    `json:"order"`
+	Description string `json:"description,omitempty"`
+	ImageURL    string `json:"imageUrl,omitempty"`
+}
+
 // IsMainTopic determina si un topic es principal (id === rootId)
 func (t *Topic) IsMainTopic() bool {
 	return t.TopicID == t.RootID

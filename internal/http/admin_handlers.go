@@ -458,7 +458,7 @@ func AdminTopicsCreateSubtopic(cfg config.Config) http.HandlerFunc {
 			return
 		}
 
-		var req domain.CreateTopicRequest
+		var req domain.CreateSubtopicRequest
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_request", "invalid json")
