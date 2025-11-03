@@ -78,6 +78,7 @@ func NewRouter(cfg config.Config) http.Handler {
 		r.Get("/topics", AdminTopicsList(cfg))
 		r.Get("/topics/{id}", AdminTopicsGetByID(cfg))
 		r.Get("/topics/{id}/subtopics", AdminTopicsGetSubtopics(cfg))
+		r.Post("/topics/{id}/subtopics", AdminTopicsCreateSubtopic(cfg))
 		r.Post("/topics", AdminTopicsCreate(cfg))
 		r.Put("/topics/{id}", AdminTopicsUpdate(cfg))
 		r.Patch("/topics/{id}/enabled", AdminTopicsToggleEnabled(cfg))

@@ -447,6 +447,123 @@ func AdminTopicsGetSubtopics(cfg config.Config) http.HandlerFunc {
 	}
 }
 
+// AdminTopicsCreateSubtopic - Crear nuevo subtopic
+func AdminTopicsCreateSubtopic(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Obtener parentId de la URL
+		parentIdStr := chi.URLParam(r, "id")
+		parentId, err := strconv.Atoi(parentIdStr)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_id", "parent id inválido")
+			return
+		}
+
+		var req domain.CreateTopicRequest
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid json")
+			return
+		}
+
+		// Validaciones básicas
+		if req.Title == "" {
+			writeError(w, http.StatusUnprocessableEntity, "validation_error", "title es requerido")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		client, err := getMongoClient(ctx, cfg)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer client.Disconnect(context.Background())
+
+		col := client.Database(cfg.DBName).Collection("topics_uuid_map")
+
+		// 1. Validar que el parent topic existe y es un tema principal
+		var parentTopic domain.Topic
+		if err := col.FindOne(ctx, bson.M{"id": parentId}).Decode(&parentTopic); err != nil {
+			if err == mongo.ErrNoDocuments {
+				writeError(w, http.StatusNotFound, "not_found", "tema principal no encontrado")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		// Validar que es un tema principal (id === rootId)
+		if parentTopic.TopicID != parentTopic.RootID {
+			writeError(w, http.StatusUnprocessableEntity, "validation_error", "solo se pueden crear subtemas en temas principales")
+			return
+		}
+
+		log.Printf("🔍 AdminTopicsCreateSubtopic - Parent: ID=%d, UUID=%s, Area=%d", parentTopic.TopicID, parentTopic.UUID, parentTopic.Area)
+
+		// 2. Generar ID único para el subtopic según el rango del área
+		// Buscar el último ID del área
+		var maxTopic domain.Topic
+		opts := options.FindOne().SetSort(bson.D{{Key: "id", Value: -1}})
+		err = col.FindOne(ctx, bson.M{"area": parentTopic.Area}, opts).Decode(&maxTopic)
+
+		nextID := 1
+		if err == nil && maxTopic.TopicID > 0 {
+			nextID = maxTopic.TopicID + 1
+		} else if err != nil && err != mongo.ErrNoDocuments {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		log.Printf("🔍 AdminTopicsCreateSubtopic - Siguiente ID para área %d: %d", parentTopic.Area, nextID)
+
+		// 3. Generar UUID único
+		topicUUID := uuid.NewString()
+
+		// 4. Validar tipo si se proporciona, sino heredar del parent
+		subtopicType := req.Type
+		if subtopicType == "" {
+			subtopicType = parentTopic.Type // Heredar tipo del parent
+		}
+
+		// Validar tipo
+		if subtopicType != "topic" && subtopicType != "exam" && subtopicType != "misc" {
+			writeError(w, http.StatusUnprocessableEntity, "validation_error", "type debe ser 'topic', 'exam' o 'misc'")
+			return
+		}
+
+		// 5. Crear el subtopic
+		now := time.Now()
+		subtopic := domain.Topic{
+			ID:          uuid.NewString(),
+			TopicID:     nextID,
+			UUID:        topicUUID,
+			RootID:      parentTopic.TopicID,    // RootId = id del parent
+			RootUUID:    parentTopic.RootUUID,   // RootUuid = uuid del parent (que es igual a rootUuid del parent)
+			Area:        parentTopic.Area,       // Heredar área
+			Title:       req.Title,
+			Description: req.Description,
+			ImageURL:    req.ImageURL,
+			Enabled:     true,  // Por defecto habilitado
+			Premium:     false, // Por defecto no premium
+			Type:        subtopicType,
+			Order:       req.Order,
+			ParentUUID:  parentTopic.UUID, // Referencia al UUID del parent
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+
+		if _, err := col.InsertOne(ctx, subtopic); err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		log.Printf("✅ AdminTopicsCreateSubtopic - Subtopic %d creado bajo parent %d, type: %s, área: %d", subtopic.TopicID, parentId, subtopic.Type, subtopic.Area)
+		writeJSON(w, http.StatusCreated, subtopic)
+	}
+}
+
 // AdminTopicsCreate - Crear nuevo topic
 func AdminTopicsCreate(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
