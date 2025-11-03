@@ -2440,3 +2440,264 @@ func AdminCopyQuestionsFromTopics(cfg config.Config) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, response)
 	}
 }
+
+// AdminUploadQuestionsToTopic - Subir preguntas desde JSON a un topic
+func AdminUploadQuestionsToTopic(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
+		// Obtener topicId de la URL
+		topicIdStr := chi.URLParam(r, "id")
+		topicId, err := strconv.Atoi(topicIdStr)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_id", "topic id inválido")
+			return
+		}
+
+		// Parsear request body
+		var req struct {
+			Area        int                     `json:"area"`
+			TopicID     int                     `json:"topicId"`
+			SubtopicID  *int                    `json:"subtopicId,omitempty"`
+			Questions   []domain.QuestionFromJSON `json:"questions"`
+			Mode        string                  `json:"mode"` // "add" o "replace"
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid json body")
+			return
+		}
+
+		// Validaciones básicas
+		if req.Area == 0 || req.TopicID == 0 {
+			writeError(w, http.StatusUnprocessableEntity, "validation_error", "area y topicId son requeridos")
+			return
+		}
+
+		if len(req.Questions) == 0 {
+			writeError(w, http.StatusUnprocessableEntity, "validation_error", "debe enviar al menos una pregunta")
+			return
+		}
+
+		if req.Mode != "add" && req.Mode != "replace" {
+			writeError(w, http.StatusUnprocessableEntity, "validation_error", "mode debe ser 'add' o 'replace'")
+			return
+		}
+
+		// Conectar a MongoDB
+		client, err := getMongoClient(ctx, cfg)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		defer client.Disconnect(context.Background())
+
+		db := client.Database(cfg.DBName)
+		topicsCol := db.Collection("topics_uuid_map")
+		questionsCol := db.Collection("questions")
+		questionsUnitsCol := db.Collection("questions_units_uuid")
+
+		// 1. Validar que el topic existe
+		var topic domain.Topic
+		if err := topicsCol.FindOne(ctx, bson.M{"id": topicId}).Decode(&topic); err != nil {
+			if err == mongo.ErrNoDocuments {
+				writeError(w, http.StatusNotFound, "not_found", "topic no encontrado")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		log.Printf("🔍 AdminUploadQuestionsToTopic - Topic encontrado: ID=%d, UUID=%s, Area=%d", topic.TopicID, topic.UUID, topic.Area)
+
+		// 2. Validar que el subtopic existe si se proporcionó
+		var subtopic *domain.Topic
+		if req.SubtopicID != nil {
+			var st domain.Topic
+			if err := topicsCol.FindOne(ctx, bson.M{"id": *req.SubtopicID}).Decode(&st); err != nil {
+				if err == mongo.ErrNoDocuments {
+					writeError(w, http.StatusNotFound, "not_found", "subtopic no encontrado")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+				return
+			}
+
+			// Validar que el subtopic pertenece al topic
+			if st.RootID != topic.TopicID {
+				writeError(w, http.StatusUnprocessableEntity, "validation_error", "el subtopic no pertenece al topic especificado")
+				return
+			}
+
+			subtopic = &st
+			log.Printf("🔍 AdminUploadQuestionsToTopic - Subtopic encontrado: ID=%d, UUID=%s", subtopic.TopicID, subtopic.UUID)
+		}
+
+		// Determinar el topic/subtopic de destino
+		targetTopic := topic
+		if subtopic != nil {
+			targetTopic = *subtopic
+		}
+
+		// 3. Si el modo es "replace", eliminar relaciones antiguas
+		if req.Mode == "replace" {
+			deleteFilter := bson.M{
+				"topicId":   targetTopic.TopicID,
+				"topicUuid": targetTopic.UUID,
+			}
+			deleteResult, err := questionsUnitsCol.DeleteMany(ctx, deleteFilter)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+				return
+			}
+			log.Printf("🔍 AdminUploadQuestionsToTopic - Eliminadas %d relaciones antiguas", deleteResult.DeletedCount)
+		}
+
+		// 4. Obtener el máximo questionId para generar IDs únicos
+		opts := options.Find().SetSort(bson.D{{Key: "questionId", Value: -1}}).SetLimit(1)
+		cursor, err := questionsCol.Find(ctx, bson.M{}, opts)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		maxQuestionID := 0
+		if cursor.Next(ctx) {
+			var lastQuestion domain.Question
+			if err := cursor.Decode(&lastQuestion); err == nil {
+				maxQuestionID = lastQuestion.QuestionID
+			}
+		}
+		cursor.Close(ctx)
+
+		log.Printf("🔍 AdminUploadQuestionsToTopic - Máximo questionId: %d", maxQuestionID)
+
+		// Obtener el máximo answer ID para generar IDs únicos
+		answerOpts := options.Find().SetSort(bson.D{{Key: "answers.id", Value: -1}}).SetLimit(1)
+		answerCursor, err := questionsCol.Find(ctx, bson.M{}, answerOpts)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+		maxAnswerID := 0
+		if answerCursor.Next(ctx) {
+			var qWithAnswers struct {
+				Answers []domain.QuestionAnswer `bson:"answers"`
+			}
+			if err := answerCursor.Decode(&qWithAnswers); err == nil {
+				for _, ans := range qWithAnswers.Answers {
+					if ans.ID > maxAnswerID {
+						maxAnswerID = ans.ID
+					}
+				}
+			}
+		}
+		answerCursor.Close(ctx)
+
+		log.Printf("🔍 AdminUploadQuestionsToTopic - Máximo answerId: %d", maxAnswerID)
+
+		// 5. Preparar preguntas y relaciones para insertar
+		var questionsToInsert []interface{}
+		var questionUnitsToInsert []interface{}
+		currentQuestionID := maxQuestionID
+		currentAnswerID := maxAnswerID
+
+		for _, qJSON := range req.Questions {
+			currentQuestionID++
+
+			// Convertir options a answers con IDs
+			var answers []domain.QuestionAnswer
+			for _, opt := range qJSON.Options {
+				currentAnswerID++
+				answers = append(answers, domain.QuestionAnswer{
+					ID:      currentAnswerID,
+					Text:    opt.Text,
+					Correct: opt.Correct,
+				})
+			}
+
+			// Crear documento de pregunta
+			questionDoc := bson.M{
+				"questionId": currentQuestionID,
+				"question":   qJSON.Statement,
+				"provider":   "ADMIN",
+				"created":    time.Now().Format("2006-01-02 15:04:05"),
+				"enabled":    true,
+				"answers":    answers,
+			}
+			questionsToInsert = append(questionsToInsert, questionDoc)
+
+			// Crear documento de relación topic-pregunta
+			unitDoc := bson.M{
+				"topicId":      targetTopic.TopicID,
+				"topicUuid":    targetTopic.UUID,
+				"rootTopicId":  targetTopic.RootID,
+				"rootTopicUuid": targetTopic.RootUUID,
+				"area":         targetTopic.Area,
+				"questionId":   currentQuestionID,
+			}
+			questionUnitsToInsert = append(questionUnitsToInsert, unitDoc)
+		}
+
+		// 6. Insertar preguntas y relaciones usando BulkWrite
+		if len(questionsToInsert) > 0 {
+			// Insertar preguntas
+			var questionOps []mongo.WriteModel
+			for _, doc := range questionsToInsert {
+				op := mongo.NewInsertOneModel().SetDocument(doc)
+				questionOps = append(questionOps, op)
+			}
+
+			_, err = questionsCol.BulkWrite(ctx, questionOps)
+			if err != nil {
+				log.Printf("❌ AdminUploadQuestionsToTopic - Error insertando preguntas: %v", err)
+				writeError(w, http.StatusInternalServerError, "server_error", "error insertando preguntas: "+err.Error())
+				return
+			}
+
+			log.Printf("✅ AdminUploadQuestionsToTopic - Insertadas %d preguntas", len(questionsToInsert))
+		}
+
+		if len(questionUnitsToInsert) > 0 {
+			// Insertar relaciones
+			var unitOps []mongo.WriteModel
+			for _, doc := range questionUnitsToInsert {
+				op := mongo.NewInsertOneModel().SetDocument(doc)
+				unitOps = append(unitOps, op)
+			}
+
+			_, err = questionsUnitsCol.BulkWrite(ctx, unitOps)
+			if err != nil {
+				log.Printf("❌ AdminUploadQuestionsToTopic - Error insertando relaciones: %v", err)
+				writeError(w, http.StatusInternalServerError, "server_error", "error insertando relaciones: "+err.Error())
+				return
+			}
+
+			log.Printf("✅ AdminUploadQuestionsToTopic - Insertadas %d relaciones", len(questionUnitsToInsert))
+		}
+
+		// 7. Obtener total de preguntas después de la operación
+		totalCount, err := questionsUnitsCol.CountDocuments(ctx, bson.M{
+			"topicId":   targetTopic.TopicID,
+			"topicUuid": targetTopic.UUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
+			return
+		}
+
+		// 8. Preparar respuesta
+		response := struct {
+			Message         string `json:"message"`
+			QuestionsAdded  int    `json:"questionsAdded"`
+			TotalQuestions  int64  `json:"totalQuestions"`
+		}{
+			Message:        fmt.Sprintf("Se subieron %d preguntas correctamente", len(req.Questions)),
+			QuestionsAdded: len(req.Questions),
+			TotalQuestions: totalCount,
+		}
+
+		writeJSON(w, http.StatusOK, response)
+	}
+}

@@ -87,6 +87,7 @@ func NewRouter(cfg config.Config) http.Handler {
 		// Gestión de preguntas de topics
 		r.Get("/topics/{id}/available-sources", AdminGetAvailableSourceTopics(cfg))
 		r.Post("/topics/{id}/copy-questions", AdminCopyQuestionsFromTopics(cfg))
+		r.Post("/topics/{id}/upload-questions", AdminUploadQuestionsToTopic(cfg))
 
 		// Administración de áreas
 		r.Get("/areas", AdminAreasList(cfg))

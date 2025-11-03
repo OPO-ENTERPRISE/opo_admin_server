@@ -169,3 +169,46 @@ type CopyQuestionsResponse struct {
 	QuestionsCopied int    `json:"questionsCopied"`
 	TopicsProcessed int    `json:"topicsProcessed"`
 }
+
+// QuestionAnswer representa una respuesta de una pregunta
+type QuestionAnswer struct {
+	ID      int    `bson:"id" json:"id"`
+	Text    string `bson:"text" json:"text"`
+	Correct bool   `bson:"correct" json:"correct"`
+}
+
+// Question representa una pregunta en la colección questions
+type Question struct {
+	MongoID     string           `bson:"_id,omitempty" json:"_id,omitempty"`
+	QuestionID  int              `bson:"questionId" json:"questionId"`
+	Question    string           `bson:"question" json:"question"`
+	Provider    string           `bson:"provider,omitempty" json:"provider,omitempty"`
+	Created     string           `bson:"created,omitempty" json:"created,omitempty"`
+	Enabled     bool             `bson:"enabled" json:"enabled"`
+	Explanation string           `bson:"explanation,omitempty" json:"explanation,omitempty"`
+	Answers     []QuestionAnswer `bson:"answers" json:"answers"`
+}
+
+// QuestionUnit representa la relación entre un topic y una pregunta
+type QuestionUnit struct {
+	MongoID       string `bson:"_id,omitempty" json:"_id,omitempty"`
+	TopicID       int    `bson:"topicId" json:"topicId"`
+	TopicUuid     string `bson:"topicUuid" json:"topicUuid"`
+	RootTopicID   int    `bson:"rootTopicId" json:"rootTopicId"`
+	RootTopicUuid string `bson:"rootTopicUuid" json:"rootTopicUuid"`
+	Area          int    `bson:"area" json:"area"`
+	QuestionID    int    `bson:"questionId" json:"questionId"`
+}
+
+// QuestionFromJSON representa la estructura JSON para subir preguntas
+type QuestionFromJSON struct {
+	Statement string                   `json:"statement"`
+	Options   []QuestionOptionFromJSON `json:"options"`
+	Multi     bool                     `json:"multi"`
+}
+
+// QuestionOptionFromJSON representa una opción desde el JSON
+type QuestionOptionFromJSON struct {
+	Text    string `json:"text"`
+	Correct bool   `json:"correct"`
+}
