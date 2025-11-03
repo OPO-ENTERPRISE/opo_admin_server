@@ -2641,11 +2641,12 @@ func AdminUploadQuestionsToTopic(cfg config.Config) http.HandlerFunc {
 				return
 			}
 
-			// Validar que el subtopic pertenece al topic
-			if st.RootID != topic.TopicID {
-				writeError(w, http.StatusUnprocessableEntity, "validation_error", "el subtopic no pertenece al topic especificado")
-				return
-			}
+		// Validar que el subtopic pertenece al topic
+		log.Printf("🔍 AdminUploadQuestionsToTopic - Validación de subtopic: subtopic.rootId=%d, topic.TopicID=%d", st.RootID, topic.TopicID)
+		if st.RootID != topic.TopicID {
+			writeError(w, http.StatusUnprocessableEntity, "validation_error", "el subtopic no pertenece al topic especificado")
+			return
+		}
 
 			subtopic = &st
 			log.Printf("🔍 AdminUploadQuestionsToTopic - Subtopic encontrado: ID=%d, UUID=%s", subtopic.TopicID, subtopic.UUID)
