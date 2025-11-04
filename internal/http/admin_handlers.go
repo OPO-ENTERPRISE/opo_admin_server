@@ -419,7 +419,9 @@ func AdminTopicsGetSubtopics(cfg config.Config) http.HandlerFunc {
 			"id":     bson.M{"$ne": id}, // id !== rootId
 		}
 
-		cur, err := col.Find(ctx, filter, options.Find())
+		// Ordenar por el campo "order" de menor a mayor
+		findOptions := options.Find().SetSort(bson.M{"order": 1})
+		cur, err := col.Find(ctx, filter, findOptions)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "server_error", err.Error())
 			return
@@ -710,6 +712,18 @@ func AdminTopicsUpdate(cfg config.Config) http.HandlerFunc {
 				"order":       req.Order,
 				"updatedAt":   time.Now(),
 			},
+		}
+
+		// Agregar rootId al update si se proporciona
+		if req.RootID != 0 {
+			update["$set"].(bson.M)["rootId"] = req.RootID
+			log.Printf("🔄 AdminTopicsUpdate - Actualizando rootId del topic %d a %d", id, req.RootID)
+		}
+
+		// Agregar rootUuid al update si se proporciona
+		if req.RootUUID != "" {
+			update["$set"].(bson.M)["rootUuid"] = req.RootUUID
+			log.Printf("🔄 AdminTopicsUpdate - Actualizando rootUuid del topic %d", id)
 		}
 
 		// Agregar área al update si se proporciona
