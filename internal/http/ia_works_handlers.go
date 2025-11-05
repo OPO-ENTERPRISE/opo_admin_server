@@ -22,63 +22,87 @@ import (
 // AdminIAWorksUploadFile - Subir archivo y convertirlo a texto plano
 func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("📤 [IA-WORKS-UPLOAD] Iniciando procesamiento de upload")
+		
 		// Validar método
 		if r.Method != http.MethodPost {
+			log.Printf("❌ [IA-WORKS-UPLOAD] Método no permitido: %s", r.Method)
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "solo se permite POST")
 			return
 		}
 
+		log.Printf("📤 [IA-WORKS-UPLOAD] Content-Type: %s", r.Header.Get("Content-Type"))
+		log.Printf("📤 [IA-WORKS-UPLOAD] Content-Length: %s", r.Header.Get("Content-Length"))
+
 		// Parsear multipart form (límite de 100MB)
+		log.Printf("📤 [IA-WORKS-UPLOAD] Parseando multipart form (límite: 100MB)...")
 		err := r.ParseMultipartForm(100 << 20) // 100MB
 		if err != nil {
+			log.Printf("❌ [IA-WORKS-UPLOAD] Error al parsear multipart form: %v", err)
 			writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("error al parsear formulario: %v", err))
 			return
 		}
+		log.Printf("✅ [IA-WORKS-UPLOAD] Multipart form parseado correctamente")
 
 		// Obtener archivo
+		log.Printf("📤 [IA-WORKS-UPLOAD] Obteniendo archivo del formulario...")
 		file, handler, err := r.FormFile("file")
 		if err != nil {
+			log.Printf("❌ [IA-WORKS-UPLOAD] Error al obtener archivo: %v", err)
 			writeError(w, http.StatusBadRequest, "invalid_request", "archivo no encontrado en la solicitud")
 			return
 		}
 		defer file.Close()
+		
+		log.Printf("✅ [IA-WORKS-UPLOAD] Archivo obtenido: %s (tamaño: %d bytes)", handler.Filename, handler.Size)
 
 		// Validar tipo de archivo
 		contentType := handler.Header.Get("Content-Type")
+		log.Printf("📤 [IA-WORKS-UPLOAD] Content-Type del archivo: %s", contentType)
+		
 		if err := services.ValidateFileType(handler.Filename, contentType); err != nil {
+			log.Printf("❌ [IA-WORKS-UPLOAD] Error de validación de tipo: %v", err)
 			writeError(w, http.StatusUnprocessableEntity, "validation_error", err.Error())
 			return
 		}
+		log.Printf("✅ [IA-WORKS-UPLOAD] Tipo de archivo válido")
 
 		// Crear directorio temporal si no existe
-		tempDir := "temp/uploads"
+		tempDir := "/tmp/uploads"
+		log.Printf("📤 [IA-WORKS-UPLOAD] Creando directorio temporal: %s", tempDir)
 		if err := os.MkdirAll(tempDir, 0755); err != nil {
-			log.Printf("Error al crear directorio temporal: %v", err)
+			log.Printf("❌ [IA-WORKS-UPLOAD] Error al crear directorio temporal: %v", err)
 			writeError(w, http.StatusInternalServerError, "server_error", "error al crear directorio temporal")
 			return
 		}
+		log.Printf("✅ [IA-WORKS-UPLOAD] Directorio temporal creado")
 
 		// Generar ID único para el documento
 		documentID := uuid.New().String()
 		fileExt := filepath.Ext(handler.Filename)
 		tempFilePath := filepath.Join(tempDir, documentID+fileExt)
+		log.Printf("📤 [IA-WORKS-UPLOAD] Ruta temporal: %s", tempFilePath)
 
 		// Guardar archivo temporalmente
+		log.Printf("📤 [IA-WORKS-UPLOAD] Creando archivo temporal...")
 		dst, err := os.Create(tempFilePath)
 		if err != nil {
-			log.Printf("Error al crear archivo temporal: %v", err)
+			log.Printf("❌ [IA-WORKS-UPLOAD] Error al crear archivo temporal: %v", err)
 			writeError(w, http.StatusInternalServerError, "server_error", "error al guardar archivo")
 			return
 		}
 		defer dst.Close()
 
 		// Copiar contenido del archivo
-		if _, err := io.Copy(dst, file); err != nil {
-			log.Printf("Error al copiar archivo: %v", err)
+		log.Printf("📤 [IA-WORKS-UPLOAD] Copiando contenido del archivo...")
+		bytesWritten, err := io.Copy(dst, file)
+		if err != nil {
+			log.Printf("❌ [IA-WORKS-UPLOAD] Error al copiar archivo: %v", err)
 			os.Remove(tempFilePath)
 			writeError(w, http.StatusInternalServerError, "server_error", "error al guardar archivo")
 			return
 		}
+		log.Printf("✅ [IA-WORKS-UPLOAD] Archivo guardado: %d bytes escritos", bytesWritten)
 
 		// Determinar tipo de archivo
 		fileType := strings.ToLower(fileExt)
@@ -94,13 +118,15 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 		}
 
 		// Convertir archivo a texto
+		log.Printf("📤 [IA-WORKS-UPLOAD] Iniciando conversión del archivo (tipo: %s)...", contentTypeForConversion)
 		text, err := services.ConvertFileToText(tempFilePath, contentTypeForConversion)
 		if err != nil {
-			log.Printf("Error al convertir archivo: %v", err)
+			log.Printf("❌ [IA-WORKS-UPLOAD] Error al convertir archivo: %v", err)
 			os.Remove(tempFilePath)
 			writeError(w, http.StatusInternalServerError, "conversion_error", fmt.Sprintf("error al convertir archivo: %v", err))
 			return
 		}
+		log.Printf("✅ [IA-WORKS-UPLOAD] Archivo convertido exitosamente. Texto extraído: %d caracteres", len(text))
 
 		// Usar contentType original para almacenar
 		if contentTypeForConversion != "" {
@@ -108,19 +134,24 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 		}
 
 		// Limpiar archivo temporal
-		os.Remove(tempFilePath)
+		log.Printf("📤 [IA-WORKS-UPLOAD] Limpiando archivo temporal...")
+		if err := os.Remove(tempFilePath); err != nil {
+			log.Printf("⚠️ [IA-WORKS-UPLOAD] Advertencia: no se pudo eliminar archivo temporal: %v", err)
+		}
 
 		// Guardar documento en MongoDB
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		log.Printf("📤 [IA-WORKS-UPLOAD] Conectando a MongoDB...")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
 		client, err := getMongoClient(ctx, cfg)
 		if err != nil {
-			log.Printf("Error conectando a MongoDB: %v", err)
+			log.Printf("❌ [IA-WORKS-UPLOAD] Error conectando a MongoDB: %v", err)
 			writeError(w, http.StatusInternalServerError, "server_error", "error al conectar con base de datos")
 			return
 		}
 		defer client.Disconnect(context.Background())
+		log.Printf("✅ [IA-WORKS-UPLOAD] Conectado a MongoDB (DB: %s)", cfg.DBName)
 
 		documents := client.Database(cfg.DBName).Collection("documents")
 		document := domain.Document{
@@ -133,12 +164,14 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 			UpdatedAt: time.Now(),
 		}
 
+		log.Printf("📤 [IA-WORKS-UPLOAD] Guardando documento en MongoDB (ID: %s)...", documentID)
 		_, err = documents.InsertOne(ctx, document)
 		if err != nil {
-			log.Printf("Error al guardar documento: %v", err)
-			writeError(w, http.StatusInternalServerError, "server_error", "error al guardar documento")
+			log.Printf("❌ [IA-WORKS-UPLOAD] Error al guardar documento en MongoDB: %v", err)
+			writeError(w, http.StatusInternalServerError, "server_error", fmt.Sprintf("error al guardar documento: %v", err))
 			return
 		}
+		log.Printf("✅ [IA-WORKS-UPLOAD] Documento guardado en MongoDB exitosamente")
 
 		// Preparar respuesta
 		response := domain.UploadFileResponse{
@@ -149,6 +182,7 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 			Status:     "uploaded",
 		}
 
+		log.Printf("✅ [IA-WORKS-UPLOAD] Upload completado exitosamente. DocumentID: %s", documentID)
 		writeJSON(w, http.StatusOK, response)
 	}
 }

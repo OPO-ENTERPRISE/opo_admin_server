@@ -63,6 +63,19 @@ func NewRouter(cfg config.Config) http.Handler {
 	// Rutas protegidas (requieren JWT)
 	r.Route(cfg.APIBasePath+"/admin", func(r chi.Router) {
 		r.Use(AuthJWT(cfg))
+		
+		// Middleware para aumentar límite de body size en rutas de upload
+		r.Route("/ia-works", func(r chi.Router) {
+			r.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					// Aumentar límite de body a 100MB solo para estas rutas
+					r.Body = http.MaxBytesReader(w, r.Body, 100<<20) // 100MB
+					next.ServeHTTP(w, r)
+				})
+			})
+			r.Post("/upload", AdminIAWorksUploadFile(cfg))
+			r.Post("/process", AdminIAWorksProcessVector(cfg))
+		})
 
 		// Handler para OPTIONS en rutas protegidas
 		r.Options("/*", func(w http.ResponseWriter, r *http.Request) {
@@ -128,10 +141,6 @@ func NewRouter(cfg config.Config) http.Handler {
 		r.Delete("/notifications/{id}", AdminNotificationsDelete(cfg))
 		r.Patch("/notifications/{id}/enabled", AdminNotificationsToggleEnabled(cfg))
 		r.Get("/notifications/{id}/stats", AdminNotificationsStats(cfg))
-
-		// IA Works - Vectorización de documentos
-		r.Post("/ia-works/upload", AdminIAWorksUploadFile(cfg))
-		r.Post("/ia-works/process", AdminIAWorksProcessVector(cfg))
 	})
 
 	return r
