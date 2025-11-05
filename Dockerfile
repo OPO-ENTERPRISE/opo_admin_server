@@ -32,10 +32,11 @@ RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o admin-server cmd/
 FROM debian:bullseye-slim
 
 # Instalar ca-certificates y librerías runtime necesarias para go-fitz
-# libc6 (glibc) viene incluido en Debian, solo necesitamos libffi
+# libc6 (glibc) viene incluido en Debian, solo necesitamos libffi runtime
+# En Debian bullseye, el paquete es libffi7
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    libffi8 \
+    libffi7 \
     && rm -rf /var/lib/apt/lists/*
 
 # Crear usuario no-root
