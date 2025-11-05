@@ -1,17 +1,17 @@
 # Dockerfile para el servidor de administración
 # Usa MongoDB Atlas en la nube - no incluye MongoDB local
-FROM golang:1.23-alpine AS builder
+# Usamos Debian en lugar de Alpine porque go-fitz requiere glibc
+FROM golang:1.23-bullseye AS builder
 
 # Instalar dependencias del sistema necesarias para compilación con CGO
 # go-fitz requiere libffi y otras librerías
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y \
     git \
     gcc \
     g++ \
-    musl-dev \
     libffi-dev \
-    mupdf-dev \
-    pkgconfig
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
 
 # Establecer directorio de trabajo
 WORKDIR /app
@@ -28,17 +28,18 @@ COPY . .
 # Compilar la aplicación con CGO habilitado (necesario para go-fitz)
 RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o admin-server cmd/admin/main.go
 
-# Imagen final
-FROM alpine:latest
+# Imagen final - usar Debian slim para compatibilidad con glibc
+FROM debian:bullseye-slim
 
 # Instalar ca-certificates y librerías runtime necesarias para go-fitz
-RUN apk --no-cache add \
+# libc6 (glibc) viene incluido en Debian, solo necesitamos libffi
+RUN apt-get update && apt-get install -y \
     ca-certificates \
-    libffi \
-    mupdf
+    libffi8 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Crear usuario no-root
-RUN adduser -D -s /bin/sh appuser
+RUN useradd -r -s /bin/bash appuser
 
 # Establecer directorio de trabajo
 WORKDIR /app

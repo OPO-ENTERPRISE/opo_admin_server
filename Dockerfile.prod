@@ -1,23 +1,23 @@
 # syntax=docker/dockerfile:1
 
 # Etapa de construcción
-FROM golang:1.23-alpine AS builder
+# Usamos Debian en lugar de Alpine porque go-fitz requiere glibc
+FROM golang:1.23-bullseye AS builder
 
 # Instalar dependencias del sistema necesarias para compilación con CGO
 # go-fitz requiere libffi y otras librerías
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y \
     git \
     ca-certificates \
     tzdata \
     gcc \
     g++ \
-    musl-dev \
     libffi-dev \
-    mupdf-dev \
-    pkgconfig
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
 
 # Crear usuario no-root para seguridad
-RUN adduser -D -s /bin/sh appuser
+RUN useradd -r -s /bin/bash appuser
 
 WORKDIR /app
 
@@ -35,15 +35,16 @@ RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
     -o admin-server ./cmd/admin
 
 # Etapa de producción
-# Usar Alpine en lugar de distroless porque necesitamos librerías runtime
-FROM alpine:latest
+# Usar Debian slim para compatibilidad con glibc
+FROM debian:bullseye-slim
 
 # Instalar librerías runtime necesarias para go-fitz
-RUN apk --no-cache add \
+# libc6 (glibc) viene incluido en Debian, solo necesitamos libffi
+RUN apt-get update && apt-get install -y \
     ca-certificates \
-    libffi \
-    mupdf \
-    tzdata
+    libffi8 \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copiar el binario compilado
 COPY --from=builder /app/admin-server /admin-server
@@ -51,7 +52,7 @@ COPY --from=builder /app/admin-server /admin-server
 # NO copiar .env para evitar sobrescribir variables de Cloud Run
 
 # Crear usuario no-root
-RUN adduser -D -s /bin/sh appuser
+RUN useradd -r -s /bin/bash appuser
 RUN chown appuser:appuser /admin-server
 USER appuser
 
