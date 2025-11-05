@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -213,6 +214,7 @@ func generateOpenAIEmbeddings(chunks []string, apiKey string) ([][]float32, erro
 
 	client := openai.NewClient(apiKey)
 	var embeddings [][]float32
+	ctx := context.Background()
 
 	for i, chunk := range chunks {
 		// Usar text-embedding-ada-002 como modelo por defecto (más común y económico)
@@ -222,7 +224,7 @@ func generateOpenAIEmbeddings(chunks []string, apiKey string) ([][]float32, erro
 			Model: openai.SmallEmbedding3, // text-embedding-3-small
 		}
 
-		resp, err := client.CreateEmbeddings(req)
+		resp, err := client.CreateEmbeddings(ctx, req)
 		if err != nil {
 			return nil, fmt.Errorf("error al generar embedding para chunk %d: %w", i, err)
 		}

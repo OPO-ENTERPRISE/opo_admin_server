@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -79,7 +80,7 @@ func (pc *PineconeClient) StoreVectors(vectors []domain.Vector, namespace string
 	}
 
 	url := fmt.Sprintf("%s/vectors/upsert", pc.getIndexURL())
-	req, err := http.NewRequestWithContext(context.Background(), "POST", url, jsonData)
+	req, err := http.NewRequestWithContext(context.Background(), "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
 		return fmt.Errorf("error al crear request: %w", err)
 	}
@@ -144,7 +145,7 @@ func (pc *PineconeClient) QueryVectors(queryVector []float32, topK int, namespac
 	}
 
 	url := fmt.Sprintf("%s/query", pc.getIndexURL())
-	req, err := http.NewRequestWithContext(context.Background(), "POST", url, jsonData)
+	req, err := http.NewRequestWithContext(context.Background(), "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("error al crear request: %w", err)
 	}

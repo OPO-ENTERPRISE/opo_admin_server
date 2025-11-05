@@ -53,10 +53,62 @@ func ConvertWordToText(filePath string) (string, error) {
 	}
 	defer doc.Close()
 
-	// Extraer texto
-	text := doc.Editable().GetText()
+	// Extraer texto usando GetContent() que devuelve el contenido XML
+	// Luego extraer el texto entre las etiquetas <w:t>
+	content := doc.Editable().GetContent()
+	
+	// Extraer texto del XML DOCX usando regex simple
+	// Buscar contenido entre etiquetas <w:t> y </w:t>
+	text := extractTextFromDocxXML(content)
 
 	return strings.TrimSpace(text), nil
+}
+
+// extractTextFromDocxXML extrae texto de XML DOCX
+func extractTextFromDocxXML(xmlContent string) string {
+	var textBuilder strings.Builder
+	
+	// Buscar todas las etiquetas <w:t> y extraer su contenido
+	// Pattern: <w:t>texto</w:t> o <w:t xml:space="preserve">texto</w:t>
+	// Usar método simple: buscar entre <w:t> y </w:t>
+	start := 0
+	for {
+		// Buscar inicio de etiqueta <w:t
+		startIdx := strings.Index(xmlContent[start:], "<w:t")
+		if startIdx == -1 {
+			break
+		}
+		startIdx += start
+		
+		// Buscar el cierre de la etiqueta de apertura >
+		endOpenTag := strings.Index(xmlContent[startIdx:], ">")
+		if endOpenTag == -1 {
+			break
+		}
+		endOpenTag += startIdx + 1
+		
+		// Buscar cierre de etiqueta </w:t>
+		closeTag := strings.Index(xmlContent[endOpenTag:], "</w:t>")
+		if closeTag == -1 {
+			break
+		}
+		
+		// Extraer texto entre las etiquetas
+		text := xmlContent[endOpenTag : endOpenTag+closeTag]
+		// Decodificar entidades XML básicas
+		text = strings.ReplaceAll(text, "&amp;", "&")
+		text = strings.ReplaceAll(text, "&lt;", "<")
+		text = strings.ReplaceAll(text, "&gt;", ">")
+		text = strings.ReplaceAll(text, "&quot;", "\"")
+		text = strings.ReplaceAll(text, "&apos;", "'")
+		
+		textBuilder.WriteString(text)
+		textBuilder.WriteString(" ")
+		
+		start = endOpenTag + closeTag + 6 // 6 = len("</w:t>")
+	}
+	
+	return textBuilder.String()
 }
 
 // ReadTextFile lee un archivo de texto plano
