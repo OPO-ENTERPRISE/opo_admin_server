@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	MaxFileSize = 10 * 1024 * 1024 // 10MB
+	MaxFileSize = 100 * 1024 * 1024 // 100MB
 )
 
 // ConvertPDFToText convierte un archivo PDF a texto plano

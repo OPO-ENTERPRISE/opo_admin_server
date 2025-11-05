@@ -28,8 +28,8 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 			return
 		}
 
-		// Parsear multipart form (límite de 10MB)
-		err := r.ParseMultipartForm(10 << 20) // 10MB
+		// Parsear multipart form (límite de 100MB)
+		err := r.ParseMultipartForm(100 << 20) // 100MB
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("error al parsear formulario: %v", err))
 			return
