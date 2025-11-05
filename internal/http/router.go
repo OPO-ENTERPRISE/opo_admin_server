@@ -119,6 +119,15 @@ func NewRouter(cfg config.Config) http.Handler {
 		// Gestión de base de datos
 		r.Get("/database/stats", AdminDatabaseStats(cfg))
 		r.Get("/database/download", AdminDatabaseDownload(cfg))
+
+		// Administración de notificaciones
+		r.Get("/notifications", AdminNotificationsList(cfg))
+		r.Get("/notifications/{id}", AdminNotificationsGetByID(cfg))
+		r.Post("/notifications", AdminNotificationsCreate(cfg))
+		r.Put("/notifications/{id}", AdminNotificationsUpdate(cfg))
+		r.Delete("/notifications/{id}", AdminNotificationsDelete(cfg))
+		r.Patch("/notifications/{id}/enabled", AdminNotificationsToggleEnabled(cfg))
+		r.Get("/notifications/{id}/stats", AdminNotificationsStats(cfg))
 	})
 
 	return r

@@ -221,3 +221,63 @@ type QuestionOptionFromJSON struct {
 	Text    string `json:"text"`
 	Correct bool   `json:"correct"`
 }
+
+// Notification representa una notificación del administrador
+type Notification struct {
+	ID          string    `bson:"_id" json:"id"`
+	Title       string    `bson:"title" json:"title"`
+	Message     string    `bson:"message" json:"message"`
+	Type        string    `bson:"type" json:"type"` // "fixed" | "simple"
+	Area        int       `bson:"area" json:"area"` // 1=PN, 2=PS, 0=todas
+	ActionType  string    `bson:"actionType,omitempty" json:"actionType,omitempty"` // "update_app" | "link" | "acknowledge" (solo para tipo "fixed")
+	ActionData  string    `bson:"actionData,omitempty" json:"actionData,omitempty"` // URL si actionType="link", versión mínima si actionType="update_app"
+	StartDate   time.Time `bson:"startDate" json:"startDate"`
+	EndDate     time.Time `bson:"endDate,omitempty" json:"endDate,omitempty"` // Opcional
+	Enabled     bool      `bson:"enabled" json:"enabled"`
+	CreatedBy   string    `bson:"createdBy" json:"createdBy"` // ID admin
+	CreatedAt   time.Time `bson:"createdAt" json:"createdAt"`
+	UpdatedAt   time.Time `bson:"updatedAt" json:"updatedAt"`
+}
+
+// NotificationRead representa una notificación leída por un usuario
+type NotificationRead struct {
+	ID             string    `bson:"_id" json:"id"`
+	UserID         string    `bson:"userId" json:"userId"`
+	NotificationID string    `bson:"notificationId" json:"notificationId"`
+	ReadAt         time.Time `bson:"readAt" json:"readAt"`
+	ActionTaken    bool      `bson:"actionTaken" json:"actionTaken"` // Solo para tipo "fixed"
+}
+
+// CreateNotificationRequest representa los datos para crear una notificación
+type CreateNotificationRequest struct {
+	Title      string    `json:"title"`
+	Message    string    `json:"message"`
+	Type       string    `json:"type"` // "fixed" | "simple"
+	Area       int       `json:"area"` // 1=PN, 2=PS, 0=todas
+	ActionType string    `json:"actionType,omitempty"`
+	ActionData string    `json:"actionData,omitempty"`
+	StartDate  time.Time `json:"startDate"`
+	EndDate    time.Time `json:"endDate,omitempty"`
+	Enabled    bool      `json:"enabled"`
+}
+
+// UpdateNotificationRequest representa los datos para actualizar una notificación
+type UpdateNotificationRequest struct {
+	Title      *string    `json:"title,omitempty"`
+	Message    *string    `json:"message,omitempty"`
+	Type       *string    `json:"type,omitempty"`
+	Area       *int       `json:"area,omitempty"`
+	ActionType *string    `json:"actionType,omitempty"`
+	ActionData *string    `json:"actionData,omitempty"`
+	StartDate  *time.Time `json:"startDate,omitempty"`
+	EndDate    *time.Time `json:"endDate,omitempty"`
+	Enabled    *bool      `json:"enabled,omitempty"`
+}
+
+// NotificationStats representa estadísticas de una notificación
+type NotificationStats struct {
+	NotificationID   string `json:"notificationId"`
+	TotalReads       int64  `json:"totalReads"`
+	TotalActions     int64  `json:"totalActions"`
+	AffectedUsers    int64  `json:"affectedUsers"`
+}
