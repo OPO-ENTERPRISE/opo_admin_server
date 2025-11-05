@@ -15,6 +15,7 @@ type Config struct {
 	CORSAllowedOrigins []string
 	DBURL              string
 	DBName             string
+	PineconeAPIKey     string
 }
 
 func Load() Config {
@@ -78,6 +79,7 @@ func Load() Config {
 		CORSAllowedOrigins: allowedOrigins,
 		DBURL:              dbURL,
 		DBName:             getenv("DB_NAME", "opo"),
+		PineconeAPIKey:     getenv("PINECONE_API_KEY", ""),
 	}
 
 	// Log de la configuración final
@@ -88,6 +90,11 @@ func Load() Config {
 	log.Printf("CORSAllowedOrigins: %v", config.CORSAllowedOrigins)
 	log.Printf("DBURL: %s", config.DBURL)
 	log.Printf("DBName: %s", config.DBName)
+	if config.PineconeAPIKey != "" {
+		log.Printf("PineconeAPIKey: %s***", config.PineconeAPIKey[:min(10, len(config.PineconeAPIKey))])
+	} else {
+		log.Printf("PineconeAPIKey: (no configurado)")
+	}
 	log.Println("=== FIN CONFIGURACIÓN FINAL ===")
 
 	return config
@@ -98,4 +105,11 @@ func getenv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

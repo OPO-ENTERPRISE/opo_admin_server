@@ -128,6 +128,10 @@ func NewRouter(cfg config.Config) http.Handler {
 		r.Delete("/notifications/{id}", AdminNotificationsDelete(cfg))
 		r.Patch("/notifications/{id}/enabled", AdminNotificationsToggleEnabled(cfg))
 		r.Get("/notifications/{id}/stats", AdminNotificationsStats(cfg))
+
+		// IA Works - Vectorización de documentos
+		r.Post("/ia-works/upload", AdminIAWorksUploadFile(cfg))
+		r.Post("/ia-works/process", AdminIAWorksProcessVector(cfg))
 	})
 
 	return r
