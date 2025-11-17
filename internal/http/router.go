@@ -60,6 +60,7 @@ func NewRouter(cfg config.Config) http.Handler {
 		r.Get("/topics/area/{areaId}", TopicListByArea(cfg))
 
 		// Endpoints públicos de usuarios (baja de cuenta)
+		r.Get("/users/deactivate", UserDeactivateForm(cfg))
 		r.Post("/users/deactivate-request", UserDeactivateRequest(cfg))
 		r.Get("/users/deactivate-confirm", UserDeactivateConfirm(cfg))
 	})
