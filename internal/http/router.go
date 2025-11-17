@@ -58,6 +58,10 @@ func NewRouter(cfg config.Config) http.Handler {
 
 		// Topics públicos (filtrados por área)
 		r.Get("/topics/area/{areaId}", TopicListByArea(cfg))
+
+		// Endpoints públicos de usuarios (baja de cuenta)
+		r.Post("/users/deactivate-request", UserDeactivateRequest(cfg))
+		r.Get("/users/deactivate-confirm", UserDeactivateConfirm(cfg))
 	})
 
 	// Rutas protegidas (requieren JWT)

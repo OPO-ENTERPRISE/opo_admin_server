@@ -16,6 +16,13 @@ type Config struct {
 	DBURL              string
 	DBName             string
 	PineconeAPIKey     string
+	// SMTP Configuration
+	SMTPHost           string
+	SMTPPort           string
+	SMTPUser           string
+	SMTPPassword       string
+	SMTPFrom           string
+	AppBaseURL         string // URL base de la aplicación para enlaces en emails
 }
 
 func Load() Config {
@@ -80,6 +87,12 @@ func Load() Config {
 		DBURL:              dbURL,
 		DBName:             getenv("DB_NAME", "opo"),
 		PineconeAPIKey:     getenv("PINECONE_API_KEY", ""),
+		SMTPHost:           getenv("SMTP_HOST", ""),
+		SMTPPort:           getenv("SMTP_PORT", "587"),
+		SMTPUser:           getenv("SMTP_USER", ""),
+		SMTPPassword:       getenv("SMTP_PASSWORD", ""),
+		SMTPFrom:           getenv("SMTP_FROM", ""),
+		AppBaseURL:         getenv("APP_BASE_URL", "http://localhost:8080"),
 	}
 
 	// Log de la configuración final
@@ -95,6 +108,10 @@ func Load() Config {
 	} else {
 		log.Printf("PineconeAPIKey: (no configurado)")
 	}
+	log.Printf("SMTPHost: %s", config.SMTPHost)
+	log.Printf("SMTPPort: %s", config.SMTPPort)
+	log.Printf("SMTPFrom: %s", config.SMTPFrom)
+	log.Printf("AppBaseURL: %s", config.AppBaseURL)
 	log.Println("=== FIN CONFIGURACIÓN FINAL ===")
 
 	return config
