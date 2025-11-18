@@ -63,6 +63,9 @@ func NewRouter(cfg config.Config) http.Handler {
 		r.Get("/users/deactivate", UserDeactivateForm(cfg))
 		r.Post("/users/deactivate-request", UserDeactivateRequest(cfg))
 		r.Get("/users/deactivate-confirm", UserDeactivateConfirm(cfg))
+
+		// Políticas de privacidad públicas
+		r.Get("/privacy-policy/{area}", PrivacyPolicyPublic(cfg))
 	})
 
 	// Rutas protegidas (requieren JWT)
@@ -146,6 +149,13 @@ func NewRouter(cfg config.Config) http.Handler {
 		r.Delete("/notifications/{id}", AdminNotificationsDelete(cfg))
 		r.Patch("/notifications/{id}/enabled", AdminNotificationsToggleEnabled(cfg))
 		r.Get("/notifications/{id}/stats", AdminNotificationsStats(cfg))
+
+		// Administración de políticas de privacidad
+		r.Get("/privacy-policies", AdminPrivacyList(cfg))
+		r.Get("/privacy-policies/area/{areaId}", AdminPrivacyGetByArea(cfg))
+		r.Post("/privacy-policies", AdminPrivacyCreate(cfg))
+		r.Put("/privacy-policies/area/{areaId}", AdminPrivacyUpdate(cfg))
+		r.Delete("/privacy-policies/area/{areaId}", AdminPrivacyDelete(cfg))
 	})
 
 	return r

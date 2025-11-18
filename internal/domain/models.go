@@ -281,3 +281,23 @@ type NotificationStats struct {
 	TotalActions     int64  `json:"totalActions"`
 	AffectedUsers    int64  `json:"affectedUsers"`
 }
+
+// PrivacyPolicy representa una política de privacidad
+type PrivacyPolicy struct {
+	ID        string    `bson:"_id" json:"id"`
+	Area      int       `bson:"area" json:"area"` // 1=PN, 2=PS
+	HTML      string    `bson:"html" json:"html"`
+	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
+	UpdatedAt time.Time `bson:"updatedAt" json:"updatedAt"`
+}
+
+// CreatePrivacyPolicyRequest representa los datos para crear una política de privacidad
+type CreatePrivacyPolicyRequest struct {
+	Area int    `json:"area"` // 1=PN, 2=PS
+	HTML string `json:"html"`
+}
+
+// UpdatePrivacyPolicyRequest representa los datos para actualizar una política de privacidad
+type UpdatePrivacyPolicyRequest struct {
+	HTML string `json:"html"`
+}
