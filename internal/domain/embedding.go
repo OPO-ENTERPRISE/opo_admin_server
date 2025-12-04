@@ -15,15 +15,16 @@ type EmbeddingConfig struct {
 
 // Document representa un documento procesado
 type Document struct {
-	ID         string              `json:"id" bson:"_id"`
-	FileName   string              `json:"fileName" bson:"fileName"`
-	FileType   string              `json:"fileType" bson:"fileType"`
-	Text       string              `json:"text" bson:"text"`
-	Paragraphs []DocumentParagraph `json:"paragraphs,omitempty" bson:"paragraphs,omitempty"`
-	Metadata   map[string]string   `json:"metadata,omitempty" bson:"metadata,omitempty"`
-	Status     string              `json:"status" bson:"status"` // "uploaded", "processed", "error"
-	CreatedAt  time.Time           `json:"createdAt" bson:"createdAt"`
-	UpdatedAt  time.Time           `json:"updatedAt" bson:"updatedAt"`
+	ID            string              `json:"id" bson:"_id"`
+	FileName      string              `json:"fileName" bson:"fileName"`
+	FileType      string              `json:"fileType" bson:"fileType"`
+	Text          string              `json:"text" bson:"text"`
+	Paragraphs    []DocumentParagraph `json:"paragraphs,omitempty" bson:"paragraphs,omitempty"`
+	ParagraphsRaw string              `json:"paragraphsRaw,omitempty" bson:"paragraphsRaw,omitempty"`
+	Metadata      map[string]string   `json:"metadata,omitempty" bson:"metadata,omitempty"`
+	Status        string              `json:"status" bson:"status"` // "uploaded", "processed", "error"
+	CreatedAt     time.Time           `json:"createdAt" bson:"createdAt"`
+	UpdatedAt     time.Time           `json:"updatedAt" bson:"updatedAt"`
 }
 
 // DocumentParagraph representa un párrafo listo para embeddings

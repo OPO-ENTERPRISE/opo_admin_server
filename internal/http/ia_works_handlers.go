@@ -181,15 +181,16 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 
 		documents := client.Database(cfg.DBName).Collection("documents")
 		document := domain.Document{
-			ID:         documentID,
-			FileName:   handler.Filename,
-			FileType:   fileType,
-			Text:       text,
-			Paragraphs: paragraphResp.Paragraphs,
-			Metadata:   metadata,
-			Status:     "uploaded",
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
+			ID:            documentID,
+			FileName:      handler.Filename,
+			FileType:      fileType,
+			Text:          text,
+			Paragraphs:    paragraphResp.Paragraphs,
+			ParagraphsRaw: paragraphResp.RawContent,
+			Metadata:      metadata,
+			Status:        "uploaded",
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 
 		log.Printf("📤 [IA-WORKS-UPLOAD] Guardando documento en MongoDB (ID: %s)...", documentID)
@@ -380,7 +381,27 @@ func extractIAWorksMetadata(r *http.Request) map[string]string {
 		if value == "" {
 			continue
 		}
-		meta[key] = value
+		normalizedKey := strings.TrimSpace(key)
+		switch normalizedKey {
+		case "metadata", "meta", "metadata_json":
+			var nested map[string]interface{}
+			if err := json.Unmarshal([]byte(value), &nested); err != nil {
+				meta[normalizedKey] = value
+				continue
+			}
+			for k, v := range nested {
+				if v == nil {
+					continue
+				}
+				strVal := strings.TrimSpace(fmt.Sprintf("%v", v))
+				if strVal == "" {
+					continue
+				}
+				meta[k] = strVal
+			}
+		default:
+			meta[normalizedKey] = value
+		}
 	}
 
 	if len(meta) == 0 {
