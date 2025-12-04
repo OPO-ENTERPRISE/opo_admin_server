@@ -16,6 +16,7 @@ type Config struct {
 	DBURL              string
 	DBName             string
 	PineconeAPIKey     string
+	DeepSeekAPIKey     string
 	// SMTP Configuration
 	SMTPHost           string
 	SMTPPort           string
@@ -87,6 +88,7 @@ func Load() Config {
 		DBURL:              dbURL,
 		DBName:             getenv("DB_NAME", "opo"),
 		PineconeAPIKey:     getenv("PINECONE_API_KEY", ""),
+		DeepSeekAPIKey:     getenv("DEEPSEEK_API_KEY", ""),
 		SMTPHost:           getenv("SMTP_HOST", ""),
 		SMTPPort:           getenv("SMTP_PORT", "587"),
 		SMTPUser:           getenv("SMTP_USER", ""),
@@ -107,6 +109,11 @@ func Load() Config {
 		log.Printf("PineconeAPIKey: %s***", config.PineconeAPIKey[:min(10, len(config.PineconeAPIKey))])
 	} else {
 		log.Printf("PineconeAPIKey: (no configurado)")
+	}
+	if config.DeepSeekAPIKey != "" {
+		log.Printf("DeepSeekAPIKey: %s***", config.DeepSeekAPIKey[:min(10, len(config.DeepSeekAPIKey))])
+	} else {
+		log.Printf("DeepSeekAPIKey: (no configurado)")
 	}
 	log.Printf("SMTPHost: %s", config.SMTPHost)
 	log.Printf("SMTPPort: %s", config.SMTPPort)

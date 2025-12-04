@@ -44,6 +44,12 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 		}
 		log.Printf("✅ [IA-WORKS-UPLOAD] Multipart form parseado correctamente")
 
+		// Obtener metadatos adicionales del formulario
+		metadata := extractIAWorksMetadata(r)
+		if len(metadata) > 0 {
+			log.Printf("📤 [IA-WORKS-UPLOAD] Metadatos adicionales recibidos: %+v", metadata)
+		}
+
 		// Obtener archivo
 		log.Printf("📤 [IA-WORKS-UPLOAD] Obteniendo archivo del formulario...")
 		file, handler, err := r.FormFile("file")
@@ -123,6 +129,31 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 		}
 		log.Printf("✅ [IA-WORKS-UPLOAD] Archivo convertido exitosamente. Texto extraído: %d caracteres", len(text))
 
+		if cfg.DeepSeekAPIKey == "" {
+			log.Printf("❌ [IA-WORKS-UPLOAD] DEEPSEEK_API_KEY no configurada")
+			writeError(w, http.StatusInternalServerError, "configuration_error", "DEEPSEEK_API_KEY no configurada")
+			return
+		}
+
+		deepSeekClient := services.NewDeepSeekClient(cfg.DeepSeekAPIKey)
+		ctxDeepSeek, cancelDeepSeek := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancelDeepSeek()
+
+		log.Printf("📤 [IA-WORKS-UPLOAD] Enviando texto a DeepSeek para segmentación...")
+		paragraphResp, err := deepSeekClient.GenerateParagraphs(ctxDeepSeek, services.DeepSeekParagraphRequest{
+			DocumentID: documentID,
+			FileName:   handler.Filename,
+			FileType:   fileType,
+			Text:       text,
+			Metadata:   metadata,
+		})
+		if err != nil {
+			log.Printf("❌ [IA-WORKS-UPLOAD] Error al procesar con DeepSeek: %v", err)
+			writeError(w, http.StatusBadGateway, "deepseek_error", fmt.Sprintf("error al generar párrafos: %v", err))
+			return
+		}
+		log.Printf("✅ [IA-WORKS-UPLOAD] DeepSeek generó %d párrafos", len(paragraphResp.Paragraphs))
+
 		// Usar contentType original para almacenar
 		if contentTypeForConversion != "" {
 			fileType = contentTypeForConversion
@@ -150,13 +181,15 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 
 		documents := client.Database(cfg.DBName).Collection("documents")
 		document := domain.Document{
-			ID:        documentID,
-			FileName:  handler.Filename,
-			FileType:  fileType,
-			Text:      text,
-			Status:    "uploaded",
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			ID:         documentID,
+			FileName:   handler.Filename,
+			FileType:   fileType,
+			Text:       text,
+			Paragraphs: paragraphResp.Paragraphs,
+			Metadata:   metadata,
+			Status:     "uploaded",
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
 		}
 
 		log.Printf("📤 [IA-WORKS-UPLOAD] Guardando documento en MongoDB (ID: %s)...", documentID)
@@ -175,6 +208,8 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 			FileType:   fileType,
 			Text:       text,
 			Status:     "uploaded",
+			Metadata:   metadata,
+			Paragraphs: paragraphResp.Paragraphs,
 		}
 
 		log.Printf("✅ [IA-WORKS-UPLOAD] Upload completado exitosamente. DocumentID: %s", documentID)
@@ -235,18 +270,17 @@ func AdminIAWorksProcessVector(cfg config.Config) http.HandlerFunc {
 			return
 		}
 
-		// Dividir texto en chunks
-		chunks, err := services.ChunkText(document.Text, req.EmbeddingConfig)
+		sourceSegments, paragraphRefs, err := resolveEmbeddingSegments(document, req.EmbeddingConfig)
 		if err != nil {
-			log.Printf("Error al dividir texto: %v", err)
-			writeError(w, http.StatusInternalServerError, "processing_error", fmt.Sprintf("error al dividir texto: %v", err))
+			log.Printf("Error preparando segmentos: %v", err)
+			writeError(w, http.StatusInternalServerError, "processing_error", err.Error())
 			return
 		}
 
-		log.Printf("Texto dividido en %d chunks", len(chunks))
+		log.Printf("Preparados %d segmentos para embeddings (modo: %s)", len(sourceSegments), segmentModeLabel(paragraphRefs))
 
 		// Generar embeddings
-		embeddings, err := services.GenerateEmbeddings(chunks, req.EmbeddingConfig)
+		embeddings, err := services.GenerateEmbeddings(sourceSegments, req.EmbeddingConfig)
 		if err != nil {
 			log.Printf("Error al generar embeddings: %v", err)
 			writeError(w, http.StatusInternalServerError, "embedding_error", fmt.Sprintf("error al generar embeddings: %v", err))
@@ -256,8 +290,8 @@ func AdminIAWorksProcessVector(cfg config.Config) http.HandlerFunc {
 		log.Printf("Generados %d embeddings", len(embeddings))
 
 		// Preparar vectores para Pinecone
-		vectors := make([]domain.Vector, len(chunks))
-		for i, chunk := range chunks {
+		vectors := make([]domain.Vector, len(sourceSegments))
+		for i, chunk := range sourceSegments {
 			vectorID := fmt.Sprintf("%s-chunk-%d", req.DocumentID, i)
 
 			// Preparar metadata
@@ -267,6 +301,16 @@ func AdminIAWorksProcessVector(cfg config.Config) http.HandlerFunc {
 			metadata["chunkIndex"] = i
 			metadata["text"] = chunk
 			metadata["createdAt"] = time.Now().Format(time.RFC3339)
+			if len(paragraphRefs) > 0 && i < len(paragraphRefs) {
+				ref := paragraphRefs[i]
+				metadata["sourceParagraphIndex"] = ref.Index
+				if ref.Summary != "" {
+					metadata["paragraphSummary"] = ref.Summary
+				}
+				if len(ref.Tags) > 0 {
+					metadata["paragraphTags"] = ref.Tags
+				}
+			}
 
 			// Agregar metadata personalizada si existe
 			if req.EmbeddingConfig.Metadata != nil {
@@ -315,9 +359,73 @@ func AdminIAWorksProcessVector(cfg config.Config) http.HandlerFunc {
 		response := domain.ProcessVectorResponse{
 			VectorID:    fmt.Sprintf("vector-%s", req.DocumentID),
 			Status:      "processed",
-			ChunksCount: len(chunks),
+			ChunksCount: len(sourceSegments),
 		}
 
 		writeJSON(w, http.StatusOK, response)
 	}
+}
+
+func extractIAWorksMetadata(r *http.Request) map[string]string {
+	if r.MultipartForm == nil || len(r.MultipartForm.Value) == 0 {
+		return nil
+	}
+
+	meta := make(map[string]string)
+	for key, values := range r.MultipartForm.Value {
+		if len(values) == 0 {
+			continue
+		}
+		value := strings.TrimSpace(values[0])
+		if value == "" {
+			continue
+		}
+		meta[key] = value
+	}
+
+	if len(meta) == 0 {
+		return nil
+	}
+
+	return meta
+}
+
+func resolveEmbeddingSegments(document domain.Document, cfg domain.EmbeddingConfig) ([]string, []domain.DocumentParagraph, error) {
+	var segments []string
+	var references []domain.DocumentParagraph
+
+	if len(document.Paragraphs) > 0 {
+		for _, para := range document.Paragraphs {
+			content := strings.TrimSpace(para.Content)
+			if content == "" {
+				continue
+			}
+			segments = append(segments, content)
+			references = append(references, para)
+		}
+
+		if len(segments) == 0 {
+			return nil, nil, fmt.Errorf("no hay párrafos utilizables en el documento")
+		}
+
+		return segments, references, nil
+	}
+
+	chunks, err := services.ChunkText(document.Text, cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error al dividir texto: %w", err)
+	}
+
+	if len(chunks) == 0 {
+		return nil, nil, fmt.Errorf("no se obtuvieron segmentos para embeddings")
+	}
+
+	return chunks, nil, nil
+}
+
+func segmentModeLabel(refs []domain.DocumentParagraph) string {
+	if len(refs) > 0 {
+		return "deepseek_paragraphs"
+	}
+	return "chunking_fallback"
 }
