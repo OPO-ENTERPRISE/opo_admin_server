@@ -34,9 +34,11 @@ El backend normaliza la clave (quita espacios) y guarda todo en `Document.Metada
 
 ## 3. Segmentación vía DeepSeek
 
-1. Tras convertir el archivo a texto plano se construye una instrucción estándar para DeepSeek (`deepseek-chat`).
-2. El texto completo + metadatos se envía a `https://api.deepseek.com/v1/chat/completions`.
-3. DeepSeek debe responder **exclusivamente** con JSON válido:
+La segmentación no ocurre durante el upload. Primero se convierte el archivo y se muestra el texto en el panel para que el usuario rellene la configuración. Cuando se invoca `POST /admin/ia-works/process`, el backend:
+
+1. Recupera el documento original.
+2. Construye la instrucción estándar de DeepSeek (`deepseek-chat`) con el texto completo y la metadata combinada (la almacenada en Mongo + la que llegue en `embeddingConfig.metadata`).
+3. Envía la petición a `https://api.deepseek.com/v1/chat/completions`, esperando **únicamente** un JSON con la forma:
 
 ```json
 {
@@ -65,16 +67,16 @@ Se guarda un documento con:
 ## 5. Procesado a vectores (`POST /api/v1/admin/ia-works/process`)
 
 1. Se recupera el documento por `documentId`.
-2. Si hay `Paragraphs`, se usan directamente como segmentos (modo `deepseek_paragraphs`).
-3. Si no, se aplica `ChunkText` como fallback (`chunking_fallback`).
-4. Cada vector incluye metadata adicional (`sourceParagraphIndex`, `paragraphSummary`, `paragraphTags`).
+2. Se verifica `DEEPSEEK_API_KEY` y se llama a DeepSeek para generar los párrafos (si la API falla, se aborta el proceso).
+3. Los párrafos devueltos se almacenan en Mongo (`paragraphs`, `paragraphsRaw`) y se usan como segmentos (`deepseek_paragraphs`). Solo si la IA no devuelve nada se cae al modo `chunking_fallback`.
+4. Cada vector incluye metadata adicional (`sourceParagraphIndex`, `paragraphSummary`, `paragraphTags`) más la metadata personalizada de `embeddingConfig`.
 5. Los vectores se envían a Pinecone con las credenciales configuradas.
 
 ## 6. Checklist para el frontend
 
-- Confirmar que se envían los campos requeridos en el multipart (`file` + `metadata` JSON).
+- Confirmar que se envían los campos requeridos en el multipart (`file` + `metadata` JSON si aplica). Durante el upload solo se necesita el archivo.
 - Validar tamaño y formato antes de lanzar la petición para evitar errores 4xx.
-- Mostrar al usuario el conteo de párrafos devueltos (`paragraphs.length`) para verificar segmentación.
+- Tras pulsar “Procesar”, mostrar el conteo de párrafos (`paragraphs.length`) devueltos por DeepSeek para verificar que la segmentación ocurrió correctamente.
 - Reintentar cuando DeepSeek responda 502/503 (el backend delega ese error como `deepseek_error`).
 
 Con estos pasos el pipeline queda listo para ingerir documentos y generar embeddings consistentes. Cualquier modificación al prompt o al formato del JSON debe actualizarse en este archivo y en `DeepSeekClient`.

@@ -129,31 +129,6 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 		}
 		log.Printf("✅ [IA-WORKS-UPLOAD] Archivo convertido exitosamente. Texto extraído: %d caracteres", len(text))
 
-		if cfg.DeepSeekAPIKey == "" {
-			log.Printf("❌ [IA-WORKS-UPLOAD] DEEPSEEK_API_KEY no configurada")
-			writeError(w, http.StatusInternalServerError, "configuration_error", "DEEPSEEK_API_KEY no configurada")
-			return
-		}
-
-		deepSeekClient := services.NewDeepSeekClient(cfg.DeepSeekAPIKey)
-		ctxDeepSeek, cancelDeepSeek := context.WithTimeout(r.Context(), 90*time.Second)
-		defer cancelDeepSeek()
-
-		log.Printf("📤 [IA-WORKS-UPLOAD] Enviando texto a DeepSeek para segmentación...")
-		paragraphResp, err := deepSeekClient.GenerateParagraphs(ctxDeepSeek, services.DeepSeekParagraphRequest{
-			DocumentID: documentID,
-			FileName:   handler.Filename,
-			FileType:   fileType,
-			Text:       text,
-			Metadata:   metadata,
-		})
-		if err != nil {
-			log.Printf("❌ [IA-WORKS-UPLOAD] Error al procesar con DeepSeek: %v", err)
-			writeError(w, http.StatusBadGateway, "deepseek_error", fmt.Sprintf("error al generar párrafos: %v", err))
-			return
-		}
-		log.Printf("✅ [IA-WORKS-UPLOAD] DeepSeek generó %d párrafos", len(paragraphResp.Paragraphs))
-
 		// Usar contentType original para almacenar
 		if contentTypeForConversion != "" {
 			fileType = contentTypeForConversion
@@ -181,16 +156,14 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 
 		documents := client.Database(cfg.DBName).Collection("documents")
 		document := domain.Document{
-			ID:            documentID,
-			FileName:      handler.Filename,
-			FileType:      fileType,
-			Text:          text,
-			Paragraphs:    paragraphResp.Paragraphs,
-			ParagraphsRaw: paragraphResp.RawContent,
-			Metadata:      metadata,
-			Status:        "uploaded",
-			CreatedAt:     time.Now(),
-			UpdatedAt:     time.Now(),
+			ID:        documentID,
+			FileName:  handler.Filename,
+			FileType:  fileType,
+			Text:      text,
+			Metadata:  metadata,
+			Status:    "uploaded",
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
 		}
 
 		log.Printf("📤 [IA-WORKS-UPLOAD] Guardando documento en MongoDB (ID: %s)...", documentID)
@@ -210,7 +183,6 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 			Text:       text,
 			Status:     "uploaded",
 			Metadata:   metadata,
-			Paragraphs: paragraphResp.Paragraphs,
 		}
 
 		log.Printf("✅ [IA-WORKS-UPLOAD] Upload completado exitosamente. DocumentID: %s", documentID)
@@ -270,6 +242,36 @@ func AdminIAWorksProcessVector(cfg config.Config) http.HandlerFunc {
 			writeError(w, http.StatusUnprocessableEntity, "validation_error", "el documento no tiene texto para procesar")
 			return
 		}
+
+		if cfg.DeepSeekAPIKey == "" {
+			writeError(w, http.StatusInternalServerError, "configuration_error", "DEEPSEEK_API_KEY no configurada")
+			return
+		}
+
+		deepSeekClient := services.NewDeepSeekClient(cfg.DeepSeekAPIKey)
+		ctxDeepSeek, cancelDeepSeek := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancelDeepSeek()
+
+		mergedMetadata := mergeMetadata(document.Metadata, flattenEmbeddingMetadata(req.EmbeddingConfig.Metadata))
+
+		log.Printf("📤 [IA-WORKS-PROCESS] Enviando documento %s a DeepSeek...", req.DocumentID)
+		paragraphResp, err := deepSeekClient.GenerateParagraphs(ctxDeepSeek, services.DeepSeekParagraphRequest{
+			DocumentID: req.DocumentID,
+			FileName:   document.FileName,
+			FileType:   document.FileType,
+			Text:       document.Text,
+			Metadata:   mergedMetadata,
+		})
+		if err != nil {
+			log.Printf("❌ [IA-WORKS-PROCESS] Error al procesar con DeepSeek: %v", err)
+			writeError(w, http.StatusBadGateway, "deepseek_error", fmt.Sprintf("error al generar párrafos: %v", err))
+			return
+		}
+		log.Printf("✅ [IA-WORKS-PROCESS] DeepSeek generó %d párrafos", len(paragraphResp.Paragraphs))
+
+		document.Paragraphs = paragraphResp.Paragraphs
+		document.ParagraphsRaw = paragraphResp.RawContent
+		document.Metadata = mergedMetadata
 
 		sourceSegments, paragraphRefs, err := resolveEmbeddingSegments(document, req.EmbeddingConfig)
 		if err != nil {
@@ -351,8 +353,11 @@ func AdminIAWorksProcessVector(cfg config.Config) http.HandlerFunc {
 		// Actualizar estado del documento en MongoDB
 		documents.UpdateOne(ctx, map[string]interface{}{"_id": req.DocumentID}, map[string]interface{}{
 			"$set": map[string]interface{}{
-				"status":    "processed",
-				"updatedAt": time.Now(),
+				"status":        "processed",
+				"updatedAt":     time.Now(),
+				"paragraphs":    document.Paragraphs,
+				"paragraphsRaw": document.ParagraphsRaw,
+				"metadata":      document.Metadata,
 			},
 		})
 
@@ -361,6 +366,8 @@ func AdminIAWorksProcessVector(cfg config.Config) http.HandlerFunc {
 			VectorID:    fmt.Sprintf("vector-%s", req.DocumentID),
 			Status:      "processed",
 			ChunksCount: len(sourceSegments),
+			Paragraphs:  document.Paragraphs,
+			Metadata:    document.Metadata,
 		}
 
 		writeJSON(w, http.StatusOK, response)
@@ -449,4 +456,55 @@ func segmentModeLabel(refs []domain.DocumentParagraph) string {
 		return "deepseek_paragraphs"
 	}
 	return "chunking_fallback"
+}
+
+func flattenEmbeddingMetadata(metadata map[string]interface{}) map[string]string {
+	if metadata == nil {
+		return nil
+	}
+
+	result := make(map[string]string)
+	for k, v := range metadata {
+		if v == nil {
+			continue
+		}
+
+		switch val := v.(type) {
+		case string:
+			if trimmed := strings.TrimSpace(val); trimmed != "" {
+				result[k] = trimmed
+			}
+		default:
+			bytes, err := json.Marshal(val)
+			if err != nil {
+				result[k] = fmt.Sprintf("%v", val)
+				continue
+			}
+			result[k] = string(bytes)
+		}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+
+	return result
+}
+
+func mergeMetadata(original map[string]string, extra map[string]string) map[string]string {
+	if original == nil && extra == nil {
+		return nil
+	}
+
+	merged := make(map[string]string)
+	for k, v := range original {
+		merged[k] = v
+	}
+	for k, v := range extra {
+		if strings.TrimSpace(v) == "" {
+			continue
+		}
+		merged[k] = v
+	}
+	return merged
 }

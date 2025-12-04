@@ -64,7 +64,9 @@ type UploadFileResponse struct {
 
 // ProcessVectorResponse representa la respuesta al procesar un documento
 type ProcessVectorResponse struct {
-	VectorID    string `json:"vectorId"`
-	Status      string `json:"status"`
-	ChunksCount int    `json:"chunksCount"`
+	VectorID    string              `json:"vectorId"`
+	Status      string              `json:"status"`
+	ChunksCount int                 `json:"chunksCount"`
+	Paragraphs  []DocumentParagraph `json:"paragraphs,omitempty"`
+	Metadata    map[string]string   `json:"metadata,omitempty"`
 }
