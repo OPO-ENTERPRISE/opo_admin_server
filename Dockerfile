@@ -59,7 +59,7 @@ ENV PORT=8080 \
     JWT_SECRET=dev-secret \
     DB_URL=mongodb+srv://terro:Terro1975%24@cluster0.8s3fkqv.mongodb.net/opo?retryWrites=true&w=majority&appName=Cluster0 \
     DB_NAME=opo
-    PINECONE_API_KEY=pcsk_jMMtR_B9tEvsd8KLqHaPRWYsb1W6U3B9utSATEwFj5MRwJTqfptYLxixsBPiDHmniVTEe
+    PINECONE_API_KEY=pcsk_jMMtR_B9tEvsd8KLqHaPRWYsb1W6U3B9utSATEwFj5MRwJTqfptYLxixsBPiDHmniVTEe \
     DEEPSEEK_API_KEY=sk-4884f84b5da34dc99d016e8727911a66
 
 
