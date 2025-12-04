@@ -23,7 +23,7 @@ import (
 func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("📤 [IA-WORKS-UPLOAD] Iniciando procesamiento de upload")
-		
+
 		// Validar método
 		if r.Method != http.MethodPost {
 			log.Printf("❌ [IA-WORKS-UPLOAD] Método no permitido: %s", r.Method)
@@ -53,13 +53,13 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 			return
 		}
 		defer file.Close()
-		
+
 		log.Printf("✅ [IA-WORKS-UPLOAD] Archivo obtenido: %s (tamaño: %d bytes)", handler.Filename, handler.Size)
 
 		// Validar tipo de archivo
 		contentType := handler.Header.Get("Content-Type")
 		log.Printf("📤 [IA-WORKS-UPLOAD] Content-Type del archivo: %s", contentType)
-		
+
 		if err := services.ValidateFileType(handler.Filename, contentType); err != nil {
 			log.Printf("❌ [IA-WORKS-UPLOAD] Error de validación de tipo: %v", err)
 			writeError(w, http.StatusUnprocessableEntity, "validation_error", err.Error())
@@ -79,7 +79,7 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 
 		// Generar ID único para el documento
 		documentID := uuid.New().String()
-		fileExt := filepath.Ext(handler.Filename)
+		fileExt := strings.ToLower(filepath.Ext(handler.Filename))
 		tempFilePath := filepath.Join(tempDir, documentID+fileExt)
 		log.Printf("📤 [IA-WORKS-UPLOAD] Ruta temporal: %s", tempFilePath)
 
@@ -105,17 +105,12 @@ func AdminIAWorksUploadFile(cfg config.Config) http.HandlerFunc {
 		log.Printf("✅ [IA-WORKS-UPLOAD] Archivo guardado: %d bytes escritos", bytesWritten)
 
 		// Determinar tipo de archivo
-		fileType := strings.ToLower(fileExt)
-		contentTypeForConversion := ""
-		if fileType == ".docx" {
-			contentTypeForConversion = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-		} else if fileType == ".doc" {
-			contentTypeForConversion = "application/msword"
-		} else if fileType == ".pdf" {
-			contentTypeForConversion = "application/pdf"
-		} else if fileType == ".txt" {
-			contentTypeForConversion = "text/plain"
-		}
+		fileType := fileExt
+		contentTypeForConversion := map[string]string{
+			".pdf":  "application/pdf",
+			".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+			".txt":  "text/plain",
+		}[fileType]
 
 		// Convertir archivo a texto
 		log.Printf("📤 [IA-WORKS-UPLOAD] Iniciando conversión del archivo (tipo: %s)...", contentTypeForConversion)
@@ -264,7 +259,7 @@ func AdminIAWorksProcessVector(cfg config.Config) http.HandlerFunc {
 		vectors := make([]domain.Vector, len(chunks))
 		for i, chunk := range chunks {
 			vectorID := fmt.Sprintf("%s-chunk-%d", req.DocumentID, i)
-			
+
 			// Preparar metadata
 			metadata := make(map[string]interface{})
 			metadata["documentId"] = req.DocumentID
@@ -272,7 +267,7 @@ func AdminIAWorksProcessVector(cfg config.Config) http.HandlerFunc {
 			metadata["chunkIndex"] = i
 			metadata["text"] = chunk
 			metadata["createdAt"] = time.Now().Format(time.RFC3339)
-			
+
 			// Agregar metadata personalizada si existe
 			if req.EmbeddingConfig.Metadata != nil {
 				for k, v := range req.EmbeddingConfig.Metadata {
@@ -293,7 +288,7 @@ func AdminIAWorksProcessVector(cfg config.Config) http.HandlerFunc {
 		// Guardar en Pinecone
 		namespace := fmt.Sprintf("document-%s", req.DocumentID)
 		indexName := "admin-docs" // Por defecto, puede ser configurable
-		
+
 		if cfg.PineconeAPIKey == "" {
 			writeError(w, http.StatusInternalServerError, "configuration_error", "PINECONE_API_KEY no configurada")
 			return
@@ -318,12 +313,11 @@ func AdminIAWorksProcessVector(cfg config.Config) http.HandlerFunc {
 
 		// Preparar respuesta
 		response := domain.ProcessVectorResponse{
-			VectorID:   fmt.Sprintf("vector-%s", req.DocumentID),
-			Status:     "processed",
+			VectorID:    fmt.Sprintf("vector-%s", req.DocumentID),
+			Status:      "processed",
 			ChunksCount: len(chunks),
 		}
 
 		writeJSON(w, http.StatusOK, response)
 	}
 }
-

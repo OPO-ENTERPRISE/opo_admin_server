@@ -1,18 +1,48 @@
 package services
 
 import (
+	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/gen2brain/go-fitz"
 	"github.com/nguyenthenguyen/docx"
 )
 
 const (
 	MaxFileSize = 100 * 1024 * 1024 // 100MB
+)
+
+type DocumentType string
+
+const (
+	DocumentTypePDF  DocumentType = "pdf"
+	DocumentTypeDOCX DocumentType = "docx"
+	DocumentTypeText DocumentType = "text"
+)
+
+var (
+	allowedExtensions   = []string{".pdf", ".docx", ".txt"}
+	supportedExtensions = map[string]DocumentType{
+		".pdf":  DocumentTypePDF,
+		".docx": DocumentTypeDOCX,
+		".txt":  DocumentTypeText,
+	}
+	supportedMimeTypes = map[DocumentType][]string{
+		DocumentTypePDF: {
+			"application/pdf",
+		},
+		DocumentTypeDOCX: {
+			"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		},
+		DocumentTypeText: {
+			"text/plain",
+		},
+	}
 )
 
 // ConvertPDFToText convierte un archivo PDF a texto plano
@@ -40,75 +70,64 @@ func ConvertPDFToText(filePath string) (string, error) {
 
 // ConvertWordToText convierte un archivo Word (DOCX) a texto plano
 func ConvertWordToText(filePath string) (string, error) {
-	// Verificar extensión
 	ext := strings.ToLower(filepath.Ext(filePath))
-	if ext != ".docx" && ext != ".doc" {
+	if ext != ".docx" {
 		return "", fmt.Errorf("formato no soportado: %s (solo se soporta .docx)", ext)
 	}
 
-	// Leer archivo DOCX
 	doc, err := docx.ReadDocxFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("error al leer archivo Word: %w", err)
 	}
 	defer doc.Close()
 
-	// Extraer texto usando GetContent() que devuelve el contenido XML
-	// Luego extraer el texto entre las etiquetas <w:t>
 	content := doc.Editable().GetContent()
-	
-	// Extraer texto del XML DOCX usando regex simple
-	// Buscar contenido entre etiquetas <w:t> y </w:t>
-	text := extractTextFromDocxXML(content)
+	text, err := extractTextFromDocxXML(content)
+	if err != nil {
+		return "", err
+	}
 
 	return strings.TrimSpace(text), nil
 }
 
-// extractTextFromDocxXML extrae texto de XML DOCX
-func extractTextFromDocxXML(xmlContent string) string {
-	var textBuilder strings.Builder
-	
-	// Buscar todas las etiquetas <w:t> y extraer su contenido
-	// Pattern: <w:t>texto</w:t> o <w:t xml:space="preserve">texto</w:t>
-	// Usar método simple: buscar entre <w:t> y </w:t>
-	start := 0
+// extractTextFromDocxXML recorre el XML buscando nodos de texto y saltos relevantes
+func extractTextFromDocxXML(xmlContent string) (string, error) {
+	decoder := xml.NewDecoder(strings.NewReader(xmlContent))
+	var builder strings.Builder
+
 	for {
-		// Buscar inicio de etiqueta <w:t
-		startIdx := strings.Index(xmlContent[start:], "<w:t")
-		if startIdx == -1 {
+		tok, err := decoder.Token()
+		if err == io.EOF {
 			break
 		}
-		startIdx += start
-		
-		// Buscar el cierre de la etiqueta de apertura >
-		endOpenTag := strings.Index(xmlContent[startIdx:], ">")
-		if endOpenTag == -1 {
-			break
+		if err != nil {
+			return "", fmt.Errorf("error al parsear XML DOCX: %w", err)
 		}
-		endOpenTag += startIdx + 1
-		
-		// Buscar cierre de etiqueta </w:t>
-		closeTag := strings.Index(xmlContent[endOpenTag:], "</w:t>")
-		if closeTag == -1 {
-			break
+
+		startElement, ok := tok.(xml.StartElement)
+		if !ok || startElement.Name.Space != "w" {
+			continue
 		}
-		
-		// Extraer texto entre las etiquetas
-		text := xmlContent[endOpenTag : endOpenTag+closeTag]
-		// Decodificar entidades XML básicas
-		text = strings.ReplaceAll(text, "&amp;", "&")
-		text = strings.ReplaceAll(text, "&lt;", "<")
-		text = strings.ReplaceAll(text, "&gt;", ">")
-		text = strings.ReplaceAll(text, "&quot;", "\"")
-		text = strings.ReplaceAll(text, "&apos;", "'")
-		
-		textBuilder.WriteString(text)
-		textBuilder.WriteString(" ")
-		
-		start = endOpenTag + closeTag + 6 // 6 = len("</w:t>")
+
+		switch startElement.Name.Local {
+		case "p":
+			if builder.Len() > 0 {
+				builder.WriteString("\n")
+			}
+		case "br":
+			builder.WriteString("\n")
+		case "tab":
+			builder.WriteString("\t")
+		case "t":
+			var text string
+			if err := decoder.DecodeElement(&text, &startElement); err != nil {
+				return "", fmt.Errorf("error al decodificar texto DOCX: %w", err)
+			}
+			builder.WriteString(text)
+		}
 	}
-	
-	return textBuilder.String()
+
+	return strings.TrimSpace(builder.String()), nil
 }
 
 // ReadTextFile lee un archivo de texto plano
@@ -119,7 +138,6 @@ func ReadTextFile(filePath string) (string, error) {
 	}
 	defer file.Close()
 
-	// Verificar tamaño
 	fileInfo, err := file.Stat()
 	if err != nil {
 		return "", fmt.Errorf("error al obtener información del archivo: %w", err)
@@ -139,19 +157,35 @@ func ReadTextFile(filePath string) (string, error) {
 
 // ConvertFileToText convierte un archivo a texto plano según su extensión
 func ConvertFileToText(filePath string, fileType string) (string, error) {
-	ext := strings.ToLower(filepath.Ext(filePath))
-	
-	// Normalizar tipo de archivo
-	if fileType == "" {
-		fileType = ext
+	if err := ensureFileSizeWithinLimit(filePath); err != nil {
+		return "", err
 	}
 
-	switch {
-	case ext == ".pdf" || fileType == "application/pdf":
+	ext := strings.ToLower(filepath.Ext(filePath))
+	docType, ok := supportedExtensions[ext]
+	if !ok {
+		return "", fmt.Errorf("extensión no permitida: %s. Extensiones permitidas: %s", ext, strings.Join(allowedExtensions, ", "))
+	}
+
+	detectedMime, err := detectMimeType(filePath)
+	if err != nil {
+		return "", err
+	}
+
+	if !mimeAllowedForType(docType, detectedMime) {
+		return "", fmt.Errorf("el contenido detectado (%s) no coincide con la extensión %s", detectedMime, ext)
+	}
+
+	if fileType != "" && !mimeAllowedForType(docType, strings.ToLower(fileType)) {
+		return "", fmt.Errorf("el tipo de contenido declarado (%s) no coincide con la extensión %s", fileType, ext)
+	}
+
+	switch docType {
+	case DocumentTypePDF:
 		return ConvertPDFToText(filePath)
-	case ext == ".docx" || ext == ".doc" || fileType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || fileType == "application/msword":
+	case DocumentTypeDOCX:
 		return ConvertWordToText(filePath)
-	case ext == ".txt" || fileType == "text/plain":
+	case DocumentTypeText:
 		return ReadTextFile(filePath)
 	default:
 		return "", fmt.Errorf("tipo de archivo no soportado: %s", ext)
@@ -161,41 +195,50 @@ func ConvertFileToText(filePath string, fileType string) (string, error) {
 // ValidateFileType valida que el tipo de archivo sea soportado
 func ValidateFileType(fileName string, contentType string) error {
 	ext := strings.ToLower(filepath.Ext(fileName))
-	
-	// Validar por extensión
-	allowedExts := []string{".pdf", ".docx", ".doc", ".txt"}
-	isValidExt := false
-	for _, allowedExt := range allowedExts {
-		if ext == allowedExt {
-			isValidExt = true
-			break
-		}
+	docType, ok := supportedExtensions[ext]
+	if !ok {
+		return fmt.Errorf("extensión no permitida: %s. Extensiones permitidas: %s", ext, strings.Join(allowedExtensions, ", "))
 	}
 
-	if !isValidExt {
-		return fmt.Errorf("extensión no permitida: %s. Extensiones permitidas: .pdf, .docx, .doc, .txt", ext)
-	}
-
-	// Validar por content type si está disponible
-	if contentType != "" {
-		allowedTypes := []string{
-			"application/pdf",
-			"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-			"application/msword",
-			"text/plain",
-		}
-		isValidType := false
-		for _, allowedType := range allowedTypes {
-			if contentType == allowedType {
-				isValidType = true
-				break
-			}
-		}
-		if !isValidType {
-			return fmt.Errorf("tipo de contenido no permitido: %s", contentType)
-		}
+	if contentType != "" && !mimeAllowedForType(docType, strings.ToLower(contentType)) {
+		return fmt.Errorf("tipo de contenido no permitido: %s para la extensión %s", contentType, ext)
 	}
 
 	return nil
 }
 
+func ensureFileSizeWithinLimit(filePath string) error {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("error al obtener información del archivo: %w", err)
+	}
+
+	if info.Size() > MaxFileSize {
+		return fmt.Errorf("archivo demasiado grande: %d bytes (máximo: %d bytes)", info.Size(), MaxFileSize)
+	}
+
+	return nil
+}
+
+func detectMimeType(filePath string) (string, error) {
+	mime, err := mimetype.DetectFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("error al detectar tipo de archivo: %w", err)
+	}
+	return strings.ToLower(mime.String()), nil
+}
+
+func mimeAllowedForType(docType DocumentType, candidate string) bool {
+	candidate = strings.ToLower(strings.TrimSpace(candidate))
+	if candidate == "" {
+		return false
+	}
+
+	for _, allowed := range supportedMimeTypes[docType] {
+		if candidate == allowed || strings.HasPrefix(candidate, allowed+";") {
+			return true
+		}
+	}
+
+	return false
+}
