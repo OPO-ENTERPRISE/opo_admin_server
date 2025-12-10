@@ -150,6 +150,12 @@ func NewRouter(cfg config.Config) http.Handler {
 		r.Patch("/notifications/{id}/enabled", AdminNotificationsToggleEnabled(cfg))
 		r.Get("/notifications/{id}/stats", AdminNotificationsStats(cfg))
 
+		// Soporte / conversación con usuarios
+		r.Get("/support/conversations", AdminSupportList(cfg))
+		r.Get("/support/conversations/{id}", AdminSupportGetByID(cfg))
+		r.Post("/support/conversations/{id}/reply", AdminSupportReply(cfg))
+		r.Patch("/support/conversations/{id}/seen", AdminSupportMarkSeen(cfg))
+
 		// Administración de políticas de privacidad
 		r.Get("/privacy-policies", AdminPrivacyList(cfg))
 		r.Get("/privacy-policies/area/{areaId}", AdminPrivacyGetByArea(cfg))

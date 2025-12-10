@@ -149,6 +149,31 @@ type CollectionStats struct {
 	Size          int64  `json:"size"`
 }
 
+// SupportMessage representa un mensaje de soporte
+type SupportMessage struct {
+	ID         string    `bson:"id" json:"id"`
+	Sender     string    `bson:"sender" json:"sender"` // "user" | "admin"
+	SenderID   string    `bson:"senderId,omitempty" json:"senderId,omitempty"`
+	SenderName string    `bson:"senderName,omitempty" json:"senderName,omitempty"`
+	Message    string    `bson:"message" json:"message"`
+	CreatedAt  time.Time `bson:"createdAt" json:"createdAt"`
+}
+
+// SupportConversation representa un hilo de conversación de soporte
+type SupportConversation struct {
+	ID            string            `bson:"_id" json:"id"`
+	UserID        string            `bson:"userId" json:"userId"`
+	UserEmail     string            `bson:"userEmail,omitempty" json:"userEmail,omitempty"`
+	Title         string            `bson:"title" json:"title"`
+	Status        string            `bson:"status" json:"status"` // open | closed
+	Messages      []SupportMessage  `bson:"messages" json:"messages"`
+	LastUpdated   time.Time         `bson:"lastUpdated" json:"lastUpdated"`
+	UnreadByAdmin bool              `bson:"unreadByAdmin" json:"unreadByAdmin"`
+	UnreadByUser  bool              `bson:"unreadByUser" json:"unreadByUser"`
+	Area          int               `bson:"area" json:"area"`
+	Metadata      map[string]string `bson:"metadata,omitempty" json:"metadata,omitempty"`
+}
+
 // ErrorResponse representa una respuesta de error
 type ErrorResponse struct {
 	Code    string `json:"code"`
